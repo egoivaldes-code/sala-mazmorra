@@ -43,6 +43,8 @@ const DB_URL = (process.env.SUPABASE_URL || '')
 const DB_KEY = (process.env.SUPABASE_KEY || '').trim();
 const HAY_DB = !!(DB_URL && DB_KEY);
 const CLAVE_EDITOR = process.env.EDITOR_PASS || '';
+/* Las fichas viven en el almacén público de Supabase. */
+const BASE_FICHAS = DB_URL ? DB_URL + '/storage/v1/object/public/fichas/' : '';
 
 async function db(camino, opciones = {}){
   const r = await fetch(DB_URL + '/rest/v1/' + camino, {
@@ -93,6 +95,45 @@ async function guardarEnemigo(fila){
   });
 }
 
+/* ---------- figuras de varias casillas ----------
+   Regla de Descent: al moverse, una figura grande sigue una sola casilla
+   (su casilla de referencia). Sólo al terminar el movimiento tiene que caber
+   desplegada. Si no cabe en ningún sitio, el movimiento entero es ilegal:
+   nunca puede quedarse encajada a medias. */
+
+function medidas(tam){
+  const m = /^(\d+)x(\d+)$/.exec(tam || '1x1');
+  return m ? { an: +m[1], al: +m[2] } : { an:1, al:1 };
+}
+
+/* Las colocaciones posibles de una figura cuya referencia está en (x,y).
+   Las monturas (2x1) nunca giran: siempre en horizontal. */
+function colocaciones(x, y, tam){
+  const { an, al } = medidas(tam);
+  const salida = [];
+  for (let dx = 0; dx < an; dx++)
+    for (let dy = 0; dy < al; dy++){
+      const celdas = [];
+      let vale = true;
+      for (let i = 0; i < an && vale; i++)
+        for (let j = 0; j < al && vale; j++){
+          const cx = x - dx + i, cy = y - dy + j;
+          if (!inBoard(cx, cy) || isWall(cx, cy)) vale = false;
+          else celdas.push([cx, cy]);
+        }
+      if (vale) salida.push(celdas);
+    }
+  return salida;
+}
+
+/* ¿Cabe desplegada aquí? Devuelve las casillas que ocuparía, o null. */
+function despliegue(room, x, y, tam, quien){
+  for (const celdas of colocaciones(x, y, tam))
+    if (celdas.every(([cx,cy]) => !occupied(room, cx, cy, quien)))
+      return celdas;
+  return null;
+}
+
 /* ---------- salas ---------- */
 const rooms = new Map();
 const GRACE = 3 * 60 * 1000; // margen para volver si se cae el wifi
@@ -104,20 +145,62 @@ function newCode(){
   while (rooms.has(c));
   return c;
 }
-const SITIOS = [[10,2],[11,5],[9,7],[10,4],[11,1],[9,3]];
+const SITIOS = [[10,1],[11,5],[9,7],[10,4],[11,1],[9,3]];
 
 /* Coloca en la sala un ejemplar de cada enemigo del catálogo.
    Todavía no se mueven: están para ver los cambios del editor al momento. */
 function poblar(room){
-  room.enemigos = catalogo.enemigos.slice(0, SITIOS.length).map((e,i) => ({
-    id: e.id + '-' + i,
-    tipo: e.id,
-    nombre: e.nombre,
-    letra: (e.datos && e.datos.letra) || e.nombre[0],
-    vida: (e.datos && e.datos.vida) || 1,
-    max:  (e.datos && e.datos.vida) || 1,
-    x: SITIOS[i][0], y: SITIOS[i][1]
-  }));
+  room.enemigos = [];
+  const familias = catalogo.enemigos.filter(e => e.datos && e.datos.variantes);
+  let piezas;
+
+  if (familias.length){
+    // una sala = una familia. Da sensación de grupo en vez de feria de monstruos.
+    const fam = room.familia && familias.find(f => f.id === room.familia)
+              || familias[Math.floor(Math.random()*familias.length)];
+    room.familia = fam.id;
+    const base = fam.datos.base || {};
+    piezas = fam.datos.variantes.slice(0, SITIOS.length).map((v, i) => ({
+      id: fam.id + '-' + i,
+      tipo: fam.id,
+      familia: fam.nombre,
+      nombre: v.papel || fam.nombre,
+      letra: (v.papel || fam.nombre)[0],
+      aro: fam.datos.aro || '#B04E3C',
+      ficha: v.ficha ? BASE_FICHAS + v.ficha : '',
+      vida: v.vida || base.vida || 4,
+      max:  v.vida || base.vida || 4,
+      tam:  v.tam  || base.tam  || '1x1'
+    }));
+  } else {
+    // contenido de reserva, por si la base no responde
+    piezas = catalogo.enemigos.slice(0, SITIOS.length).map((e, i) => {
+      const d = e.datos || {};
+      return { id: e.id+'-'+i, tipo: e.id, familia: e.nombre, nombre: e.nombre,
+               letra: d.letra || e.nombre[0], aro:'#B04E3C', ficha:'',
+               vida: d.vida||1, max: d.vida||1, tam: d.tam||'1x1' };
+    });
+  }
+
+  piezas.forEach((bicho, i) => {
+    bicho.x = SITIOS[i][0]; bicho.y = SITIOS[i][1];
+    let celdas = despliegue(room, bicho.x, bicho.y, bicho.tam, bicho.id);
+    if (!celdas) celdas = buscarHueco(room, bicho);
+    if (!celdas) return;
+    bicho.celdas = celdas;
+    room.enemigos.push(bicho);
+  });
+}
+
+/* Si su sitio de siempre está ocupado, se le busca otro donde quepa entero.
+   Se busca desde la derecha: los héroes entran por la izquierda. */
+function buscarHueco(room, bicho){
+  for (let x = W - 1; x >= 0; x--)
+    for (let y = 0; y < H; y++){
+      const celdas = despliegue(room, x, y, bicho.tam, bicho.id);
+      if (celdas){ bicho.x = x; bicho.y = y; return celdas; }
+    }
+  return null;
 }
 
 function makeRoom(){
@@ -130,8 +213,10 @@ function makeRoom(){
 function occupied(room, x, y, exceptToken){
   for (const [t,p] of room.players)
     if (t !== exceptToken && p.cls && p.x===x && p.y===y) return true;
-  for (const e of (room.enemigos||[]))
-    if (e.x===x && e.y===y) return true;
+  for (const e of (room.enemigos||[])){
+    if (e.id === exceptToken) continue;
+    if ((e.celdas||[[e.x,e.y]]).some(c => c[0]===x && c[1]===y)) return true;
+  }
   return false;
 }
 function freeStart(room){
@@ -150,8 +235,11 @@ function snapshot(room){
         token:p.token, name:p.name, cls:p.cls.id, letter:p.cls.letter,
         speed:p.cls.speed, x:p.x, y:p.y, online:p.online
       })),
+    familia: room.familia || null,
     enemigos: (room.enemigos||[]).map(e => ({
-      id:e.id, nombre:e.nombre, letra:e.letra, vida:e.vida, max:e.max, x:e.x, y:e.y
+      id:e.id, nombre:e.nombre, familia:e.familia, letra:e.letra,
+      aro:e.aro, ficha:e.ficha, vida:e.vida, max:e.max,
+      x:e.x, y:e.y, tam:e.tam || '1x1', celdas:e.celdas || [[e.x,e.y]]
     })),
     taken: [...room.players.values()].filter(p=>p.cls).map(p=>p.cls.id)
   };
@@ -270,7 +358,7 @@ io.on('connection', socket => {
     if (clave !== CLAVE_EDITOR) return cb({ ok:false, err:'Contraseña incorrecta.' });
     socket.data.editor = true;
     cb({ ok:true, enemigos: catalogo.enemigos, fuente: catalogo.fuente,
-         hayDb: HAY_DB, falla: fallaDb });
+         hayDb: HAY_DB, falla: fallaDb, base: BASE_FICHAS });
   });
 
   socket.on('ed:recargar', async (_, cb) => {
@@ -283,6 +371,8 @@ io.on('connection', socket => {
   socket.on('ed:guardar', async (fila, cb) => {
     if (!socket.data.editor) return cb({ ok:false, err:'No has entrado en el editor.' });
     if (!fila || !fila.id || !fila.nombre) return cb({ ok:false, err:'Hace falta identificador y nombre.' });
+    if (fila.datos && fila.datos.variantes && fila.datos.variantes.length !== 8)
+      return cb({ ok:false, err:'Una familia tiene ocho variantes.' });
     fila.id = String(fila.id).trim().toLowerCase().replace(/[^a-z0-9_-]/g,'');
     if (!fila.id) return cb({ ok:false, err:'El identificador sólo admite letras y números.' });
     try {
@@ -335,7 +425,12 @@ background:#2E3742;border:2px solid var(--brass);color:var(--brass);
 transition:left .18s ease,top .18s ease}
 .tok.me{box-shadow:0 0 0 3px rgba(211,166,60,.3)}
 .tok.off{opacity:.35;border-style:dashed}
-.tok.foe{background:#33241F;border-color:#B04E3C;color:#E5A08C}
+.tok.foe{background:#241C1A;border-color:#B04E3C;color:#E5A08C}
+.tok.foe.conficha{background-repeat:no-repeat;background-position:center bottom;
+background-size:118% auto;color:transparent;text-shadow:none}
+.nombrecito{position:absolute;transform:translateX(-50%);white-space:nowrap;
+font-family:var(--serif);font-size:11px;color:var(--parchment);opacity:.72;
+text-shadow:0 1px 3px #000;pointer-events:none}
 .dot{position:absolute;border-radius:50%;background:rgba(110,145,99,.3);
 border:2px solid var(--moss);cursor:pointer}
 .dot.sel{background:rgba(211,166,60,.34);border-color:var(--brass)}
@@ -434,15 +529,29 @@ function draw(){
   }
   var sz = Math.min(cw,ch)*0.74;
   (st.enemigos||[]).forEach(function(e){
+    var cs = e.celdas || [[e.x,e.y]];
+    var xs = cs.map(function(c){return c[0];}), ys = cs.map(function(c){return c[1];});
+    var x0 = Math.min.apply(null,xs), y0 = Math.min.apply(null,ys);
+    var anc = (Math.max.apply(null,xs)-x0+1), alt = (Math.max.apply(null,ys)-y0+1);
+    var ancho = anc*cw*0.86, alto = alt*ch*0.86;
     var d = document.createElement('div');
-    d.className = 'tok foe';
+    d.className = 'tok foe' + (e.ficha ? ' conficha' : '');
     d.textContent = e.letra;
-    d.title = e.nombre;
-    d.style.left = (e.x*cw + (cw-sz)/2)+'px';
-    d.style.top  = (e.y*ch + (ch-sz)/2)+'px';
-    d.style.width = sz+'px'; d.style.height = sz+'px';
-    d.style.fontSize = Math.max(12, sz*0.42)+'px';
+    d.title = e.nombre + ' - ' + (e.familia||'') + ' (' + (e.tam||'1x1') + ')';
+    d.style.left = (x0*cw + (anc*cw-ancho)/2)+'px';
+    d.style.top  = (y0*ch + (alt*ch-alto)/2)+'px';
+    d.style.width = ancho+'px'; d.style.height = alto+'px';
+    d.style.borderRadius = (anc===alt) ? '50%' : (Math.min(ancho,alto)/2)+'px';
+    d.style.fontSize = Math.max(12, Math.min(ancho,alto)*0.42)+'px';
+    if (e.aro) d.style.borderColor = e.aro;
+    if (e.ficha) d.style.backgroundImage = 'url(' + e.ficha + ')';
     b.appendChild(d);
+    var n = document.createElement('div');
+    n.className = 'nombrecito';
+    n.textContent = e.nombre;
+    n.style.left = (x0*cw + anc*cw/2)+'px';
+    n.style.top  = (y0*ch + alt*ch - 2)+'px';
+    b.appendChild(n);
   });
   st.players.forEach(function(p){
     var d = document.createElement('div');
@@ -652,7 +761,9 @@ function reach(p){
   seen[p.x+','+p.y] = 1;
   var busy = {};
   st.players.forEach(function(o){ if (o.token !== p.token) busy[o.x+','+o.y] = 1; });
-  (st.enemigos||[]).forEach(function(e){ busy[e.x+','+e.y] = 1; });
+  (st.enemigos||[]).forEach(function(e){
+    (e.celdas||[[e.x,e.y]]).forEach(function(c){ busy[c[0]+','+c[1]] = 1; });
+  });
   while (q.length){
     var n = q.shift();
     if (n.c > 0) out.push({x:n.x, y:n.y});
@@ -690,13 +801,21 @@ function render(){
   }
   var sz = Math.min(cw,ch)*0.74;
   (st.enemigos||[]).forEach(function(e){
+    var cs = e.celdas || [[e.x,e.y]];
+    var xs = cs.map(function(c){return c[0];}), ys = cs.map(function(c){return c[1];});
+    var x0 = Math.min.apply(null,xs), y0 = Math.min.apply(null,ys);
+    var anc = (Math.max.apply(null,xs)-x0+1), alt = (Math.max.apply(null,ys)-y0+1);
+    var ancho = anc*cw*0.86, alto = alt*ch*0.86;
     var d = document.createElement('div');
     d.className = 'tok foe';
     d.textContent = e.letra;
-    d.style.left = (e.x*cw + (cw-sz)/2)+'px';
-    d.style.top  = (e.y*ch + (ch-sz)/2)+'px';
-    d.style.width = sz+'px'; d.style.height = sz+'px';
-    d.style.fontSize = Math.max(11, sz*0.44)+'px';
+    d.title = e.nombre;
+    d.style.left = (x0*cw + (anc*cw-ancho)/2)+'px';
+    d.style.top  = (y0*ch + (alt*ch-alto)/2)+'px';
+    d.style.width = ancho+'px'; d.style.height = alto+'px';
+    d.style.borderRadius = (anc===alt) ? '50%' : (Math.min(ancho,alto)/2)+'px';
+    d.style.fontSize = Math.max(10, Math.min(ancho,alto)*0.44)+'px';
+    if (e.aro) d.style.borderColor = e.aro;
     b.appendChild(d);
   });
   st.players.forEach(function(o){
@@ -740,34 +859,37 @@ const EDITOR = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;600&display=swap" rel="stylesheet">
 <style>${CSS}
 body{display:flex;justify-content:center;padding:18px}
-.app{width:100%;max-width:760px}
+.app{width:100%;max-width:900px}
 h1{font-family:var(--serif);font-size:21px;font-weight:600;margin:0 0 4px}
-p.sub{color:var(--dim);font-size:13.5px;margin:0 0 18px;line-height:1.45}
-input,select{width:100%;padding:11px;background:var(--stone2);border:1px solid var(--line);
-border-radius:4px;color:var(--parchment);font-family:var(--serif);font-size:15px}
-label{display:block;font-size:11.5px;color:var(--dim);margin:0 0 4px}
-.campo{margin-bottom:11px}
-.fila{display:grid;grid-template-columns:1fr 1fr;gap:11px}
-.big{padding:13px 22px;background:var(--brass);color:#1A1408;border:0;border-radius:4px;
+h2{font-family:var(--serif);font-size:15px;font-weight:600;margin:20px 0 9px}
+p.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px;line-height:1.45}
+input,select{width:100%;padding:10px;background:var(--stone2);border:1px solid var(--line);
+border-radius:4px;color:var(--parchment);font-family:var(--serif);font-size:14.5px}
+label{display:block;font-size:11px;color:var(--dim);margin:0 0 4px}
+.campo{margin-bottom:10px}
+.fila{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+.big{padding:12px 22px;background:var(--brass);color:#1A1408;border:0;border-radius:4px;
 font-size:15px;font-weight:600}
-.lista{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px}
-.chip{padding:9px 13px;background:var(--stone2);border:1px solid var(--line);border-radius:4px;
-color:var(--parchment);font-family:var(--serif);font-size:14px}
+.chip{padding:8px 12px;background:var(--stone2);border:1px solid var(--line);border-radius:4px;
+color:var(--parchment);font-family:var(--serif);font-size:13.5px;margin:0 6px 6px 0}
 .chip[aria-pressed="true"]{border-color:var(--brass);background:#282F38}
-.err{color:#E08C7A;font-size:13px;min-height:19px;margin:9px 0 0}
+.caja{background:var(--stone2);border:1px solid var(--line);border-radius:4px;padding:14px;margin-bottom:14px}
+.err{color:#E08C7A;font-size:13px;min-height:18px;margin:8px 0 0}
 .ok{color:var(--moss)}
-.caja{background:var(--stone2);border:1px solid var(--line);border-radius:4px;padding:15px;margin-bottom:16px}
+.vars{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.var{background:var(--stone2);border:1px solid var(--line);border-radius:4px;padding:8px;text-align:center}
+.var img{width:100%;height:96px;object-fit:contain;display:block;margin-bottom:6px}
+.var input,.var select{font-size:12.5px;padding:7px;margin-bottom:5px}
 .aviso{border-left:2px solid var(--brass);padding-left:11px;color:var(--dim);font-size:13px;
-line-height:1.45;margin-bottom:18px}
+line-height:1.45;margin-bottom:16px}
 .hide{display:none}
 </style></head><body>
 <div class="app">
   <div id="puerta">
     <h1>Editor</h1>
-    <p class="sub">Sólo para ti. Los cambios entran en las partidas abiertas al momento.</p>
+    <p class="sub">Los cambios entran en las partidas abiertas al momento.</p>
     <div class="campo" style="max-width:320px">
-      <label for="cl">Contraseña</label>
-      <input id="cl" type="password" autocomplete="current-password">
+      <label for="cl">Contraseña</label><input id="cl" type="password" autocomplete="current-password">
     </div>
     <button class="big" id="pasa">Entrar</button>
     <p class="err" id="e0"></p>
@@ -776,45 +898,44 @@ line-height:1.45;margin-bottom:18px}
   <div id="panel" class="hide">
     <h1>Enemigos</h1>
     <p class="sub" id="fuente"></p>
-    <div class="aviso">Cambia algo y dale a guardar con la tele abierta al lado: la ficha se
-      actualiza sin reiniciar nada. Todavía no se mueven ni atacan.</div>
-    <div class="lista" id="lista"></div>
+    <div class="aviso">Cada familia comparte comportamiento; las ocho variantes sólo cambian
+      el aspecto y algún número. Guarda con la tele abierta al lado y lo verás cambiar.</div>
+    <div id="lista"></div>
+
+    <h2 id="tituloFam"></h2>
     <div class="caja">
       <div class="fila">
-        <div class="campo"><label for="id">Identificador</label><input id="id" placeholder="goblin"></div>
-        <div class="campo"><label for="nom">Nombre</label><input id="nom" placeholder="Goblin"></div>
-      </div>
-      <div class="fila">
-        <div class="campo"><label for="ltr">Letra en la ficha</label><input id="ltr" maxlength="2"></div>
-        <div class="campo"><label for="vid">Vida</label><input id="vid" type="number" min="1" max="99"></div>
-      </div>
-      <div class="fila">
+        <div class="campo"><label for="vid">Vida base</label><input id="vid" type="number" min="1" max="99"></div>
         <div class="campo"><label for="vel">Velocidad</label><input id="vel" type="number" min="1" max="12"></div>
-        <div class="campo"><label for="dan">Daño (mínimo y máximo)</label><input id="dan" placeholder="1-2"></div>
+        <div class="campo"><label for="dan">Daño</label><input id="dan" placeholder="2-4"></div>
+        <div class="campo"><label for="aro">Color de la familia</label><input id="aro" placeholder="#6E9163"></div>
       </div>
-      <button class="big" id="guardar">Guardar</button>
-      <button class="chip" id="nuevo" style="margin-left:8px">Nuevo enemigo</button>
-      <button class="chip" id="recargar" style="margin-left:8px">Recargar desde la base</button>
-      <p class="err" id="e1"></p>
     </div>
+
+    <h2>Las ocho variantes</h2>
+    <div class="vars" id="vars"></div>
+    <p class="err" id="e1"></p>
+    <button class="big" id="guardar" style="margin-top:14px">Guardar familia</button>
+    <button class="chip" id="recargar" style="margin-left:8px">Recargar desde la base</button>
   </div>
 </div>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-var s = io(), lista = [], sel = null;
+var s = io(), lista = [], sel = null, base = '';
 var $ = function(id){ return document.getElementById(id); };
 
+function estado(r){
+  $('fuente').textContent = r.falla
+    ? 'La base no responde (' + r.falla + '). Contenido de reserva.'
+    : 'Conectado. ' + r.enemigos.length + ' familias.';
+  $('fuente').style.color = r.falla ? '#E08C7A' : '';
+}
 $('pasa').onclick = function(){
   s.emit('ed:entrar', $('cl').value, function(r){
     if (!r.ok){ $('e0').textContent = r.err; return; }
-    lista = r.enemigos;
-    $('puerta').className = 'hide';
-    $('panel').className = '';
-    $('fuente').textContent = r.falla
-      ? 'La base no responde (' + r.falla + '). Estás viendo contenido de reserva.'
-      : 'Conectado a la base de datos. ' + r.enemigos.length + ' enemigos.';
-    $('fuente').style.color = r.falla ? '#E08C7A' : '';
-    pinta(); elige(lista[0]);
+    lista = r.enemigos; base = r.base || '';
+    $('puerta').className = 'hide'; $('panel').className = '';
+    estado(r); pinta(); elige(lista[0]);
   });
 };
 $('cl').addEventListener('keydown', function(e){ if (e.key === 'Enter') $('pasa').click(); });
@@ -829,51 +950,62 @@ function pinta(){
     l.appendChild(b);
   });
 }
+
 function elige(e){
   if (!e) return;
   sel = e;
-  var d = e.datos || {};
-  $('id').value = e.id; $('nom').value = e.nombre;
-  $('ltr').value = d.letra || ''; $('vid').value = d.vida || 1;
-  $('vel').value = d.velocidad || 3;
-  $('dan').value = (d.dano ? d.dano[0] + '-' + d.dano[1] : '1-2');
-  pinta(); $('e1').textContent = '';
-}
-$('nuevo').onclick = function(){
-  sel = null;
-  $('id').value = ''; $('nom').value = ''; $('ltr').value = '';
-  $('vid').value = 4; $('vel').value = 4; $('dan').value = '1-2';
-  pinta(); $('id').focus();
-};
-$('recargar').onclick = function(){
-  s.emit('ed:recargar', null, function(r){
-    if (!r.ok){ $('e1').textContent = r.err; return; }
-    lista = r.enemigos;
-    $('fuente').textContent = r.falla
-      ? 'La base no responde (' + r.falla + '). Estás viendo contenido de reserva.'
-      : 'Conectado a la base de datos. ' + r.enemigos.length + ' enemigos.';
-    $('fuente').style.color = r.falla ? '#E08C7A' : '';
-    pinta(); elige(lista[0]);
+  var d = e.datos || {}, b = d.base || {};
+  $('tituloFam').textContent = e.nombre;
+  $('vid').value = b.vida || 5;
+  $('vel').value = b.velocidad || 4;
+  $('dan').value = b.dano ? b.dano[0] + '-' + b.dano[1] : '2-3';
+  $('aro').value = d.aro || '';
+  var caja = $('vars'); caja.innerHTML = '';
+  (d.variantes || []).forEach(function(v, i){
+    var c = document.createElement('div');
+    c.className = 'var';
+    c.innerHTML =
+      (v.ficha ? '<img src="' + base + v.ficha + '" alt="">' : '<div style="height:96px"></div>') +
+      '<input data-i="' + i + '" data-k="papel" value="' + (v.papel || '') + '">' +
+      '<input data-i="' + i + '" data-k="vida" type="number" placeholder="vida" value="' + (v.vida || '') + '">' +
+      '<select data-i="' + i + '" data-k="tam">' +
+        '<option value="1x1">1 casilla</option>' +
+        '<option value="2x1">montura</option>' +
+        '<option value="2x2">grande</option></select>';
+    caja.appendChild(c);
+    c.querySelector('select').value = v.tam || '1x1';
   });
-};
+  $('e1').textContent = '';
+  pinta();
+}
+
 $('guardar').onclick = function(){
-  var partes = ($('dan').value || '1-2').split('-');
-  var fila = {
-    id: $('id').value, nombre: $('nom').value,
-    datos: {
-      letra: ($('ltr').value || $('nom').value.charAt(0)),
-      vida: parseInt($('vid').value, 10) || 1,
-      velocidad: parseInt($('vel').value, 10) || 3,
-      dano: [parseInt(partes[0],10) || 1, parseInt(partes[1],10) || 2]
-    }
-  };
-  s.emit('ed:guardar', fila, function(r){
+  var partes = ($('dan').value || '2-3').split('-');
+  var d = JSON.parse(JSON.stringify(sel.datos));
+  d.base = d.base || {};
+  d.base.vida = parseInt($('vid').value, 10) || 5;
+  d.base.velocidad = parseInt($('vel').value, 10) || 4;
+  d.base.dano = [parseInt(partes[0],10) || 1, parseInt(partes[1],10) || 2];
+  if ($('aro').value) d.aro = $('aro').value;
+  document.querySelectorAll('#vars [data-i]').forEach(function(campo){
+    var v = d.variantes[+campo.dataset.i], k = campo.dataset.k;
+    if (k === 'vida'){ if (campo.value) v.vida = parseInt(campo.value,10); else delete v.vida; }
+    else v[k] = campo.value;
+  });
+  s.emit('ed:guardar', { id: sel.id, nombre: sel.nombre, datos: d }, function(r){
     var e = $('e1');
     if (!r.ok){ e.className = 'err'; e.textContent = r.err; return; }
     lista = r.enemigos;
+    sel = lista.filter(function(x){ return x.id === sel.id; })[0];
     e.className = 'err ok'; e.textContent = 'Guardado. Míralo en la tele.';
-    sel = lista.filter(function(x){ return x.id === fila.id; })[0];
     pinta();
+  });
+};
+
+$('recargar').onclick = function(){
+  s.emit('ed:recargar', null, function(r){
+    if (!r.ok){ $('e1').textContent = r.err; return; }
+    lista = r.enemigos; estado(r); pinta(); elige(lista[0]);
   });
 };
 </script></body></html>`;
