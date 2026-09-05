@@ -31,6 +31,58 @@ const CLASSES = [
 ];
 const START = [[0,4],[0,3],[0,5],[1,4],[1,3],[1,5]];
 
+/* ---------- base de datos ----------
+   Si no hay claves puestas, el juego funciona igual con el contenido de reserva.
+   Así nunca se queda tirado por un fallo de la base. */
+const DB_URL = process.env.SUPABASE_URL || '';
+const DB_KEY = process.env.SUPABASE_KEY || '';
+const HAY_DB = !!(DB_URL && DB_KEY);
+const CLAVE_EDITOR = process.env.EDITOR_PASS || '';
+
+async function db(camino, opciones = {}){
+  const r = await fetch(DB_URL + '/rest/v1/' + camino, {
+    ...opciones,
+    headers: {
+      apikey: DB_KEY,
+      Authorization: 'Bearer ' + DB_KEY,
+      'Content-Type': 'application/json',
+      ...(opciones.headers || {})
+    }
+  });
+  if (!r.ok) throw new Error('base de datos: ' + r.status + ' ' + await r.text());
+  const t = await r.text();
+  return t ? JSON.parse(t) : null;
+}
+
+const RESERVA = [
+  { id:'goblin', nombre:'Goblin', datos:{ letra:'g', vida:3, velocidad:5, dano:[1,2] } },
+  { id:'orco',   nombre:'Orco',   datos:{ letra:'O', vida:8, velocidad:4, dano:[3,4] } }
+];
+
+let catalogo = { enemigos: RESERVA.slice(), fuente:'reserva' };
+
+async function cargarCatalogo(){
+  if (!HAY_DB){ console.log('Sin base de datos: uso el contenido de reserva.'); return; }
+  try {
+    const filas = await db('enemigos?select=*&order=id');
+    if (filas && filas.length){
+      catalogo = { enemigos: filas, fuente:'base de datos' };
+      console.log('Catálogo cargado: ' + filas.length + ' enemigos.');
+    }
+  } catch(e){
+    console.log('No he podido leer la base, sigo con la reserva. ' + e.message);
+  }
+}
+
+async function guardarEnemigo(fila){
+  if (!HAY_DB) throw new Error('No hay base de datos configurada.');
+  await db('enemigos', {
+    method:'POST',
+    headers:{ Prefer:'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(fila)
+  });
+}
+
 /* ---------- salas ---------- */
 const rooms = new Map();
 const GRACE = 3 * 60 * 1000; // margen para volver si se cae el wifi
@@ -42,14 +94,34 @@ function newCode(){
   while (rooms.has(c));
   return c;
 }
+const SITIOS = [[10,2],[11,5],[9,7],[10,4],[11,1],[9,3]];
+
+/* Coloca en la sala un ejemplar de cada enemigo del catálogo.
+   Todavía no se mueven: están para ver los cambios del editor al momento. */
+function poblar(room){
+  room.enemigos = catalogo.enemigos.slice(0, SITIOS.length).map((e,i) => ({
+    id: e.id + '-' + i,
+    tipo: e.id,
+    nombre: e.nombre,
+    letra: (e.datos && e.datos.letra) || e.nombre[0],
+    vida: (e.datos && e.datos.vida) || 1,
+    max:  (e.datos && e.datos.vida) || 1,
+    x: SITIOS[i][0], y: SITIOS[i][1]
+  }));
+}
+
 function makeRoom(){
   const code = newCode();
-  rooms.set(code, { code, players:new Map(), created:Date.now() });
+  const room = { code, players:new Map(), enemigos:[], created:Date.now() };
+  rooms.set(code, room);
+  poblar(room);
   return code;
 }
 function occupied(room, x, y, exceptToken){
   for (const [t,p] of room.players)
     if (t !== exceptToken && p.cls && p.x===x && p.y===y) return true;
+  for (const e of (room.enemigos||[]))
+    if (e.x===x && e.y===y) return true;
   return false;
 }
 function freeStart(room){
@@ -68,6 +140,9 @@ function snapshot(room){
         token:p.token, name:p.name, cls:p.cls.id, letter:p.cls.letter,
         speed:p.cls.speed, x:p.x, y:p.y, online:p.online
       })),
+    enemigos: (room.enemigos||[]).map(e => ({
+      id:e.id, nombre:e.nombre, letra:e.letra, vida:e.vida, max:e.max, x:e.x, y:e.y
+    })),
     taken: [...room.players.values()].filter(p=>p.cls).map(p=>p.cls.id)
   };
 }
@@ -179,6 +254,31 @@ io.on('connection', socket => {
     cb && cb({ ok:true });
   });
 
+  /* ----- editor ----- */
+  socket.on('ed:entrar', (clave, cb) => {
+    if (!CLAVE_EDITOR) return cb({ ok:false, err:'El editor está apagado. Falta poner EDITOR_PASS en Render.' });
+    if (clave !== CLAVE_EDITOR) return cb({ ok:false, err:'Contraseña incorrecta.' });
+    socket.data.editor = true;
+    cb({ ok:true, enemigos: catalogo.enemigos, fuente: catalogo.fuente, hayDb: HAY_DB });
+  });
+
+  socket.on('ed:guardar', async (fila, cb) => {
+    if (!socket.data.editor) return cb({ ok:false, err:'No has entrado en el editor.' });
+    if (!fila || !fila.id || !fila.nombre) return cb({ ok:false, err:'Hace falta identificador y nombre.' });
+    fila.id = String(fila.id).trim().toLowerCase().replace(/[^a-z0-9_-]/g,'');
+    if (!fila.id) return cb({ ok:false, err:'El identificador sólo admite letras y números.' });
+    try {
+      await guardarEnemigo(fila);
+      const i = catalogo.enemigos.findIndex(e => e.id === fila.id);
+      if (i >= 0) catalogo.enemigos[i] = fila; else catalogo.enemigos.push(fila);
+      // el cambio entra en las partidas que ya están abiertas, sin reiniciar
+      for (const room of rooms.values()){ poblar(room); push(room); }
+      cb({ ok:true, enemigos: catalogo.enemigos });
+    } catch(e){
+      cb({ ok:false, err: e.message });
+    }
+  });
+
   socket.on('disconnect', () => {
     const room = rooms.get(socket.data.code);
     if (!room || socket.data.isTv) return;
@@ -215,6 +315,7 @@ background:#2E3742;border:2px solid var(--brass);color:var(--brass);
 transition:left .18s ease,top .18s ease}
 .tok.me{box-shadow:0 0 0 3px rgba(211,166,60,.3)}
 .tok.off{opacity:.35;border-style:dashed}
+.tok.foe{background:#33241F;border-color:#B04E3C;color:#E5A08C}
 .dot{position:absolute;border-radius:50%;background:rgba(110,145,99,.3);
 border:2px solid var(--moss);cursor:pointer}
 .dot.sel{background:rgba(211,166,60,.34);border-color:var(--brass)}
@@ -306,6 +407,17 @@ function draw(){
     b.appendChild(c);
   }
   var sz = Math.min(cw,ch)*0.74;
+  (st.enemigos||[]).forEach(function(e){
+    var d = document.createElement('div');
+    d.className = 'tok foe';
+    d.textContent = e.letra;
+    d.title = e.nombre;
+    d.style.left = (e.x*cw + (cw-sz)/2)+'px';
+    d.style.top  = (e.y*ch + (ch-sz)/2)+'px';
+    d.style.width = sz+'px'; d.style.height = sz+'px';
+    d.style.fontSize = Math.max(12, sz*0.42)+'px';
+    b.appendChild(d);
+  });
   st.players.forEach(function(p){
     var d = document.createElement('div');
     d.className = 'tok' + (p.online ? '' : ' off');
@@ -498,6 +610,7 @@ function reach(p){
   seen[p.x+','+p.y] = 1;
   var busy = {};
   st.players.forEach(function(o){ if (o.token !== p.token) busy[o.x+','+o.y] = 1; });
+  (st.enemigos||[]).forEach(function(e){ busy[e.x+','+e.y] = 1; });
   while (q.length){
     var n = q.shift();
     if (n.c > 0) out.push({x:n.x, y:n.y});
@@ -534,6 +647,16 @@ function render(){
     b.appendChild(c);
   }
   var sz = Math.min(cw,ch)*0.74;
+  (st.enemigos||[]).forEach(function(e){
+    var d = document.createElement('div');
+    d.className = 'tok foe';
+    d.textContent = e.letra;
+    d.style.left = (e.x*cw + (cw-sz)/2)+'px';
+    d.style.top  = (e.y*ch + (ch-sz)/2)+'px';
+    d.style.width = sz+'px'; d.style.height = sz+'px';
+    d.style.fontSize = Math.max(11, sz*0.44)+'px';
+    b.appendChild(d);
+  });
   st.players.forEach(function(o){
     var d = document.createElement('div');
     d.className = 'tok' + (o.token === token ? ' me' : '') + (o.online ? '' : ' off');
@@ -568,8 +691,146 @@ function render(){
 window.addEventListener('resize', render);
 </script></body></html>`;
 
+/* ---------- editor ---------- */
+const EDITOR = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Editor de enemigos</title>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;600&display=swap" rel="stylesheet">
+<style>${CSS}
+body{display:flex;justify-content:center;padding:18px}
+.app{width:100%;max-width:760px}
+h1{font-family:var(--serif);font-size:21px;font-weight:600;margin:0 0 4px}
+p.sub{color:var(--dim);font-size:13.5px;margin:0 0 18px;line-height:1.45}
+input,select{width:100%;padding:11px;background:var(--stone2);border:1px solid var(--line);
+border-radius:4px;color:var(--parchment);font-family:var(--serif);font-size:15px}
+label{display:block;font-size:11.5px;color:var(--dim);margin:0 0 4px}
+.campo{margin-bottom:11px}
+.fila{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.big{padding:13px 22px;background:var(--brass);color:#1A1408;border:0;border-radius:4px;
+font-size:15px;font-weight:600}
+.lista{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px}
+.chip{padding:9px 13px;background:var(--stone2);border:1px solid var(--line);border-radius:4px;
+color:var(--parchment);font-family:var(--serif);font-size:14px}
+.chip[aria-pressed="true"]{border-color:var(--brass);background:#282F38}
+.err{color:#E08C7A;font-size:13px;min-height:19px;margin:9px 0 0}
+.ok{color:var(--moss)}
+.caja{background:var(--stone2);border:1px solid var(--line);border-radius:4px;padding:15px;margin-bottom:16px}
+.aviso{border-left:2px solid var(--brass);padding-left:11px;color:var(--dim);font-size:13px;
+line-height:1.45;margin-bottom:18px}
+.hide{display:none}
+</style></head><body>
+<div class="app">
+  <div id="puerta">
+    <h1>Editor</h1>
+    <p class="sub">Sólo para ti. Los cambios entran en las partidas abiertas al momento.</p>
+    <div class="campo" style="max-width:320px">
+      <label for="cl">Contraseña</label>
+      <input id="cl" type="password" autocomplete="current-password">
+    </div>
+    <button class="big" id="pasa">Entrar</button>
+    <p class="err" id="e0"></p>
+  </div>
+
+  <div id="panel" class="hide">
+    <h1>Enemigos</h1>
+    <p class="sub" id="fuente"></p>
+    <div class="aviso">Cambia algo y dale a guardar con la tele abierta al lado: la ficha se
+      actualiza sin reiniciar nada. Todavía no se mueven ni atacan.</div>
+    <div class="lista" id="lista"></div>
+    <div class="caja">
+      <div class="fila">
+        <div class="campo"><label for="id">Identificador</label><input id="id" placeholder="goblin"></div>
+        <div class="campo"><label for="nom">Nombre</label><input id="nom" placeholder="Goblin"></div>
+      </div>
+      <div class="fila">
+        <div class="campo"><label for="ltr">Letra en la ficha</label><input id="ltr" maxlength="2"></div>
+        <div class="campo"><label for="vid">Vida</label><input id="vid" type="number" min="1" max="99"></div>
+      </div>
+      <div class="fila">
+        <div class="campo"><label for="vel">Velocidad</label><input id="vel" type="number" min="1" max="12"></div>
+        <div class="campo"><label for="dan">Daño (mínimo y máximo)</label><input id="dan" placeholder="1-2"></div>
+      </div>
+      <button class="big" id="guardar">Guardar</button>
+      <button class="chip" id="nuevo" style="margin-left:8px">Nuevo enemigo</button>
+      <p class="err" id="e1"></p>
+    </div>
+  </div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+var s = io(), lista = [], sel = null;
+var $ = function(id){ return document.getElementById(id); };
+
+$('pasa').onclick = function(){
+  s.emit('ed:entrar', $('cl').value, function(r){
+    if (!r.ok){ $('e0').textContent = r.err; return; }
+    lista = r.enemigos;
+    $('puerta').className = 'hide';
+    $('panel').className = '';
+    $('fuente').textContent = r.hayDb
+      ? 'Guardando en la base de datos.'
+      : 'Sin base de datos: los cambios se perderán al reiniciar.';
+    pinta(); elige(lista[0]);
+  });
+};
+$('cl').addEventListener('keydown', function(e){ if (e.key === 'Enter') $('pasa').click(); });
+
+function pinta(){
+  var l = $('lista'); l.innerHTML = '';
+  lista.forEach(function(e){
+    var b = document.createElement('button');
+    b.className = 'chip'; b.textContent = e.nombre;
+    b.setAttribute('aria-pressed', sel && sel.id === e.id);
+    b.onclick = function(){ elige(e); };
+    l.appendChild(b);
+  });
+}
+function elige(e){
+  if (!e) return;
+  sel = e;
+  var d = e.datos || {};
+  $('id').value = e.id; $('nom').value = e.nombre;
+  $('ltr').value = d.letra || ''; $('vid').value = d.vida || 1;
+  $('vel').value = d.velocidad || 3;
+  $('dan').value = (d.dano ? d.dano[0] + '-' + d.dano[1] : '1-2');
+  pinta(); $('e1').textContent = '';
+}
+$('nuevo').onclick = function(){
+  sel = null;
+  $('id').value = ''; $('nom').value = ''; $('ltr').value = '';
+  $('vid').value = 4; $('vel').value = 4; $('dan').value = '1-2';
+  pinta(); $('id').focus();
+};
+$('guardar').onclick = function(){
+  var partes = ($('dan').value || '1-2').split('-');
+  var fila = {
+    id: $('id').value, nombre: $('nom').value,
+    datos: {
+      letra: ($('ltr').value || $('nom').value.charAt(0)),
+      vida: parseInt($('vid').value, 10) || 1,
+      velocidad: parseInt($('vel').value, 10) || 3,
+      dano: [parseInt(partes[0],10) || 1, parseInt(partes[1],10) || 2]
+    }
+  };
+  s.emit('ed:guardar', fila, function(r){
+    var e = $('e1');
+    if (!r.ok){ e.className = 'err'; e.textContent = r.err; return; }
+    lista = r.enemigos;
+    e.className = 'err ok'; e.textContent = 'Guardado. Míralo en la tele.';
+    sel = lista.filter(function(x){ return x.id === fila.id; })[0];
+    pinta();
+  });
+};
+</script></body></html>`;
+
+app.get('/editor', (_, res) => res.type('html').send(EDITOR));
 app.get('/tv', (_, res) => res.type('html').send(TV));
 app.get('/', (_, res) => res.type('html').send(PLAYER));
 app.get('/salud', (_, res) => res.json({ ok:true, salas: rooms.size }));
 
-server.listen(PORT, () => console.log('En marcha en el puerto ' + PORT));
+cargarCatalogo().then(() => {
+  server.listen(PORT, () => {
+    console.log('En marcha en el puerto ' + PORT);
+    console.log('Contenido: ' + catalogo.fuente + '. Editor: ' + (CLAVE_EDITOR ? 'activo' : 'apagado'));
+  });
+});
