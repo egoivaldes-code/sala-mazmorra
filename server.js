@@ -390,6 +390,8 @@ background:#2E3742;border:1px solid var(--brass);color:var(--brass);font-family:
     <div class="url" id="url"></div>
     <div class="qr"><img id="qr" alt="Código QR para entrar"></div>
     <div id="list"><div class="empty">Nadie ha entrado todavía.</div></div>
+    <button id="nueva" style="margin-top:14px;padding:9px 14px;background:transparent;
+      border:1px solid var(--line);border-radius:4px;color:var(--dim);font-size:13px">Empezar sala nueva</button>
   </div>
 </div>
 <script src="/socket.io/socket.io.js"></script>
@@ -398,11 +400,11 @@ ${DESPIERTA}
 despierta();
 var s = io(), st = null;
 var saved = null;
-try { saved = sessionStorage.getItem('tvcode'); } catch(e){}
+try { saved = localStorage.getItem('tvcode'); } catch(e){}
 function opened(r){
-  if(!r.ok){ try{ sessionStorage.removeItem('tvcode'); }catch(e){} location.reload(); return; }
+  if(!r.ok){ try{ localStorage.removeItem('tvcode'); }catch(e){} location.reload(); return; }
   st = r.state;
-  try { sessionStorage.setItem('tvcode', st.code); } catch(e){}
+  try { localStorage.setItem('tvcode', st.code); } catch(e){}
   var u = location.origin + '/?s=' + st.code;
   document.getElementById('code').textContent = st.code;
   document.getElementById('url').textContent = u;
@@ -411,6 +413,10 @@ function opened(r){
   draw();
 }
 if (saved) s.emit('tv:rejoin', saved, opened); else s.emit('tv:open', null, opened);
+document.getElementById('nueva').onclick = function(){
+  try { localStorage.removeItem('tvcode'); } catch(e){}
+  location.reload();
+};
 s.on('state', function(x){ st = x; draw(); });
 
 function draw(){
@@ -543,8 +549,18 @@ try {
 } catch(e){ token = Math.random().toString(36).slice(2); }
 
 var qs = new URLSearchParams(location.search);
-if (qs.get('s')) document.getElementById('code').value = qs.get('s').toUpperCase();
+var deQr = qs.get('s') ? qs.get('s').toUpperCase() : null;
+if (deQr) document.getElementById('code').value = deQr;
 try { if (localStorage.getItem('nm')) document.getElementById('name').value = localStorage.getItem('nm'); } catch(e){}
+
+/* Si el QR trae una sala distinta a la guardada, manda el QR:
+   quiere decir que la tele ha abierto otra partida. */
+try {
+  var guardada = localStorage.getItem('rm');
+  if (deQr && guardada && deQr !== guardada) localStorage.removeItem('rm');
+} catch(e){}
+
+var salaActual = null;
 
 function show(n){
   ['s1','s2','s3'].forEach(function(id, i){
@@ -564,18 +580,25 @@ document.getElementById('enter').onclick = function(){
   try { localStorage.setItem('nm', name); localStorage.setItem('rm', code); } catch(e){}
   s.emit('join', { code:code, token:token, name:name }, function(r){
     if (!r.ok){ document.getElementById('e1').textContent = r.err; return; }
+    salaActual = code;
     st = r.state; me = r.me;
     if (me.cls) show(3); else { heroList(); show(2); }
     render();
   });
 };
 
-/* volver solo si ya habías entrado antes */
+/* volver solo si ya habías entrado antes y el QR no dice otra cosa */
 try {
   var rm = localStorage.getItem('rm');
   if (rm) s.emit('join', { code:rm, token:token, name: localStorage.getItem('nm') || 'Jugador' },
     function(r){
-      if (!r.ok) return;
+      if (!r.ok){
+        // la sala se cerró: se olvida y se pide el código otra vez
+        try { localStorage.removeItem('rm'); } catch(e){}
+        document.getElementById('e1').textContent = 'La partida anterior ya no existe. Escanea el QR otra vez.';
+        return;
+      }
+      salaActual = rm;
       st = r.state; me = r.me;
       if (me.cls) show(3); else { heroList(); show(2); }
       render();
@@ -609,11 +632,10 @@ s.on('state', function(x){
 s.on('disconnect', function(){ document.getElementById('conn').textContent = 'sin conexión'; });
 s.on('connect', function(){
   document.getElementById('conn').textContent = '';
-  try {
-    var rm = localStorage.getItem('rm');
-    if (rm) s.emit('join', { code:rm, token:token, name: localStorage.getItem('nm') || 'Jugador' },
-      function(r){ if (r.ok){ st = r.state; me = r.me; render(); } });
-  } catch(e){}
+  var vuelta = salaActual;
+  if (!vuelta){ try { vuelta = localStorage.getItem('rm'); } catch(e){} }
+  if (vuelta) s.emit('join', { code:vuelta, token:token, name: localStorage.getItem('nm') || 'Jugador' },
+    function(r){ if (r.ok){ st = r.state; me = r.me; render(); } });
 });
 
 document.getElementById('mv').onclick = function(){ mode = !mode; pend = null; render(); };
