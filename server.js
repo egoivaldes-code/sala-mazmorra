@@ -233,13 +233,15 @@ function snapshot(room){
       .filter(p => p.cls)
       .map(p => ({
         token:p.token, name:p.name, cls:p.cls.id, letter:p.cls.letter,
-        speed:p.cls.speed, x:p.x, y:p.y, online:p.online
+        speed:p.cls.speed, x:p.x, y:p.y, online:p.online, senala:p.senala || null
       })),
     familia: room.familia || null,
     enemigos: (room.enemigos||[]).map(e => ({
       id:e.id, nombre:e.nombre, familia:e.familia, letra:e.letra,
       aro:e.aro, ficha:e.ficha, vida:e.vida, max:e.max,
-      x:e.x, y:e.y, tam:e.tam || '1x1', celdas:e.celdas || [[e.x,e.y]]
+      x:e.x, y:e.y, tam:e.tam || '1x1', celdas:e.celdas || [[e.x,e.y]],
+      // quién lo tiene señalado como objetivo ahora mismo
+      senalan: [...room.players.values()].filter(p => p.cls && p.senala === e.id).map(p => p.name)
     })),
     taken: [...room.players.values()].filter(p=>p.cls).map(p=>p.cls.id)
   };
@@ -389,6 +391,17 @@ io.on('connection', socket => {
     }
   });
 
+  socket.on('senalar', (id, cb) => {
+    const room = rooms.get(socket.data.code);
+    if (!room) return cb && cb({ ok:false });
+    const p = room.players.get(socket.data.token);
+    if (!p || !p.cls) return cb && cb({ ok:false });
+    // señalar lo mismo otra vez lo quita
+    p.senala = (p.senala === id) ? null : id;
+    push(room);
+    cb && cb({ ok:true, senala: p.senala });
+  });
+
   socket.on('disconnect', () => {
     const room = rooms.get(socket.data.code);
     if (!room || socket.data.isTv) return;
@@ -425,9 +438,18 @@ background:#2E3742;border:2px solid var(--brass);color:var(--brass);
 transition:left .18s ease,top .18s ease}
 .tok.me{box-shadow:0 0 0 3px rgba(211,166,60,.3)}
 .tok.off{opacity:.35;border-style:dashed}
-.tok.foe{background:#241C1A;border-color:#B04E3C;color:#E5A08C}
-.tok.foe.conficha{background-repeat:no-repeat;background-position:center bottom;
-background-size:118% auto;color:transparent;text-shadow:none}
+.tok.foe{border:0;border-radius:0;background:transparent;color:#E5A08C;
+text-shadow:0 1px 3px #000}
+.tok.foe.conficha{background-repeat:no-repeat;background-position:center center;
+background-size:contain;color:transparent;text-shadow:none}
+/* en el móvil no hay dibujo: hace falta algo que marque la casilla */
+.tok.foe.marca{background:#2A333E;border:2px solid #6B7A8A;border-radius:3px;color:#D6DEE8}
+/* la casilla se ilumina cuando alguien la señala como objetivo */
+.objetivo{position:absolute;border:2px solid var(--brass);border-radius:2px;
+background:rgba(211,166,60,.16);box-shadow:0 0 14px rgba(211,166,60,.35) inset;
+pointer-events:none;animation:latir 1.6s ease-in-out infinite}
+@keyframes latir{0%,100%{opacity:.55}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.objetivo{animation:none;opacity:.8}}
 .nombrecito{position:absolute;transform:translateX(-50%);white-space:nowrap;
 font-family:var(--serif);font-size:11px;color:var(--parchment);opacity:.72;
 text-shadow:0 1px 3px #000;pointer-events:none}
@@ -533,24 +555,31 @@ function draw(){
     var xs = cs.map(function(c){return c[0];}), ys = cs.map(function(c){return c[1];});
     var x0 = Math.min.apply(null,xs), y0 = Math.min.apply(null,ys);
     var anc = (Math.max.apply(null,xs)-x0+1), alt = (Math.max.apply(null,ys)-y0+1);
-    var ancho = anc*cw*0.86, alto = alt*ch*0.86;
+    if (e.senalan && e.senalan.length){
+      var o = document.createElement('div');
+      o.className = 'objetivo';
+      o.style.left = (x0*cw)+'px'; o.style.top = (y0*ch)+'px';
+      o.style.width = (anc*cw)+'px'; o.style.height = (alt*ch)+'px';
+      b.appendChild(o);
+    }
     var d = document.createElement('div');
     d.className = 'tok foe' + (e.ficha ? ' conficha' : '');
     d.textContent = e.letra;
     d.title = e.nombre + ' - ' + (e.familia||'') + ' (' + (e.tam||'1x1') + ')';
-    d.style.left = (x0*cw + (anc*cw-ancho)/2)+'px';
-    d.style.top  = (y0*ch + (alt*ch-alto)/2)+'px';
-    d.style.width = ancho+'px'; d.style.height = alto+'px';
-    d.style.borderRadius = (anc===alt) ? '50%' : (Math.min(ancho,alto)/2)+'px';
-    d.style.fontSize = Math.max(12, Math.min(ancho,alto)*0.42)+'px';
-    if (e.aro) d.style.borderColor = e.aro;
+    d.style.left = (x0*cw)+'px';
+    d.style.top  = (y0*ch)+'px';
+    d.style.width = (anc*cw)+'px'; d.style.height = (alt*ch)+'px';
+    d.style.fontSize = Math.max(12, Math.min(anc*cw, alt*ch)*0.4)+'px';
     if (e.ficha) d.style.backgroundImage = 'url(' + e.ficha + ')';
     b.appendChild(d);
     var n = document.createElement('div');
     n.className = 'nombrecito';
-    n.textContent = e.nombre;
+    n.textContent = (e.senalan && e.senalan.length)
+      ? e.nombre + ' \u2190 ' + e.senalan.join(', ')
+      : e.nombre;
+    if (e.senalan && e.senalan.length) n.style.opacity = '1';
     n.style.left = (x0*cw + anc*cw/2)+'px';
-    n.style.top  = (y0*ch + alt*ch - 2)+'px';
+    n.style.top  = (y0*ch + alt*ch + 1)+'px';
     b.appendChild(n);
   });
   st.players.forEach(function(p){
@@ -805,17 +834,23 @@ function render(){
     var xs = cs.map(function(c){return c[0];}), ys = cs.map(function(c){return c[1];});
     var x0 = Math.min.apply(null,xs), y0 = Math.min.apply(null,ys);
     var anc = (Math.max.apply(null,xs)-x0+1), alt = (Math.max.apply(null,ys)-y0+1);
-    var ancho = anc*cw*0.86, alto = alt*ch*0.86;
+    if (e.senalan && e.senalan.length){
+      var o = document.createElement('div');
+      o.className = 'objetivo';
+      o.style.left = (x0*cw)+'px'; o.style.top = (y0*ch)+'px';
+      o.style.width = (anc*cw)+'px'; o.style.height = (alt*ch)+'px';
+      b.appendChild(o);
+    }
     var d = document.createElement('div');
-    d.className = 'tok foe';
+    d.className = 'tok foe marca';
     d.textContent = e.letra;
     d.title = e.nombre;
-    d.style.left = (x0*cw + (anc*cw-ancho)/2)+'px';
-    d.style.top  = (y0*ch + (alt*ch-alto)/2)+'px';
-    d.style.width = ancho+'px'; d.style.height = alto+'px';
-    d.style.borderRadius = (anc===alt) ? '50%' : (Math.min(ancho,alto)/2)+'px';
-    d.style.fontSize = Math.max(10, Math.min(ancho,alto)*0.44)+'px';
-    if (e.aro) d.style.borderColor = e.aro;
+    d.style.left = (x0*cw)+'px';
+    d.style.top  = (y0*ch)+'px';
+    d.style.width = (anc*cw)+'px'; d.style.height = (alt*ch)+'px';
+    d.style.fontSize = Math.max(10, Math.min(anc*cw, alt*ch)*0.42)+'px';
+    d.style.cursor = 'pointer';
+    d.onclick = function(){ s.emit('senalar', e.id, function(){}); };
     b.appendChild(d);
   });
   st.players.forEach(function(o){
@@ -847,7 +882,12 @@ function render(){
   document.getElementById('cf').className = pend ? 'row' : 'row hide';
   document.getElementById('hint').textContent = mode
     ? 'Toca a dónde quieres ir. Puedes moverte ' + p.speed + ' casillas.'
-    : 'Muévete cuando quieras. Los demás lo ven en la tele.';
+    : (function(){
+        var mio = (st.enemigos||[]).filter(function(x){
+          return x.senalan && x.senalan.indexOf(p.name) >= 0; })[0];
+        return mio ? 'Señalas a ' + mio.nombre + '. Tócalo otra vez para soltarlo.'
+                   : 'Toca un enemigo para señalarlo en la tele.';
+      })();
 }
 window.addEventListener('resize', render);
 </script></body></html>`;
