@@ -34,6 +34,7 @@ const START = [[0,4],[0,3],[0,5],[1,4],[1,3],[1,5]];
 /* ---------- salas ---------- */
 const rooms = new Map();
 const GRACE = 3 * 60 * 1000; // margen para volver si se cae el wifi
+const AVISO = 20 * 1000;     // espera antes de decir a los demás que alguien se ha caído
 
 function newCode(){
   let c;
@@ -98,7 +99,10 @@ setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms){
     for (const [t,p] of room.players)
-      if (!p.online && now - p.left > GRACE) room.players.delete(t);
+      if (!p.online && now - p.left > GRACE){
+        if (p.pending) clearTimeout(p.pending);
+        room.players.delete(t);
+      }
     if (room.players.size === 0 && now - room.created > GRACE) rooms.delete(code);
   }
 }, 60000);
@@ -130,6 +134,8 @@ io.on('connection', socket => {
 
     let p = room.players.get(token);
     if (p){
+      // ha vuelto: si había un aviso de desconexión en camino, se cancela
+      if (p.pending){ clearTimeout(p.pending); p.pending = null; }
       p.online = true;
       p.name = name || p.name;
     } else {
@@ -177,7 +183,16 @@ io.on('connection', socket => {
     const room = rooms.get(socket.data.code);
     if (!room || socket.data.isTv) return;
     const p = room.players.get(socket.data.token);
-    if (p){ p.online = false; p.left = Date.now(); push(room); }
+    if (!p) return;
+    p.left = Date.now();
+    // no se avisa de golpe: casi todos los cortes duran un par de segundos.
+    // sólo si pasan 20 y no ha vuelto se le marca como desconectado.
+    if (p.pending) clearTimeout(p.pending);
+    p.pending = setTimeout(() => {
+      p.pending = null;
+      p.online = false;
+      if (rooms.has(room.code)) push(room);
+    }, AVISO);
   });
 });
 
@@ -206,6 +221,22 @@ border:2px solid var(--moss);cursor:pointer}
 button{font-family:var(--serif);cursor:pointer}
 :focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.tok{transition:none}}
+`;
+
+/* Pide al móvil que no apague la pantalla mientras se juega.
+   Si el navegador no sabe hacerlo, no pasa nada: sigue como antes. */
+const DESPIERTA = `
+var wl = null;
+function despierta(){
+  if (!('wakeLock' in navigator)) return;
+  navigator.wakeLock.request('screen').then(function(l){
+    wl = l;
+    l.addEventListener('release', function(){ wl = null; });
+  }).catch(function(){});
+}
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'visible' && wl === null) despierta();
+});
 `;
 
 /* ---------- pantalla de la tele ---------- */
@@ -242,6 +273,8 @@ background:#2E3742;border:1px solid var(--brass);color:var(--brass);font-family:
 </div>
 <script src="/socket.io/socket.io.js"></script>
 <script>
+${DESPIERTA}
+despierta();
 var s = io(), st = null;
 var saved = null;
 try { saved = sessionStorage.getItem('tvcode'); } catch(e){}
@@ -366,6 +399,7 @@ border:1px solid var(--line)}
 </div>
 <script src="/socket.io/socket.io.js"></script>
 <script>
+${DESPIERTA}
 var s = io(), st = null, me = null, mode = false, pend = null;
 
 /* el móvil te recuerda: llave guardada aquí */
@@ -392,6 +426,7 @@ function myPlayer(){
 }
 
 document.getElementById('enter').onclick = function(){
+  despierta(); // se pide al tocar: así los navegadores lo aceptan
   var code = document.getElementById('code').value.trim().toUpperCase();
   var name = document.getElementById('name').value.trim() || 'Jugador';
   try { localStorage.setItem('nm', name); localStorage.setItem('rm', code); } catch(e){}
