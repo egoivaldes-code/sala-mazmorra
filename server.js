@@ -34,8 +34,13 @@ const START = [[0,4],[0,3],[0,5],[1,4],[1,3],[1,5]];
 /* ---------- base de datos ----------
    Si no hay claves puestas, el juego funciona igual con el contenido de reserva.
    Así nunca se queda tirado por un fallo de la base. */
-const DB_URL = process.env.SUPABASE_URL || '';
-const DB_KEY = process.env.SUPABASE_KEY || '';
+/* Admite que la dirección venga con barra final o con /rest/v1 ya incluido:
+   los dos casos son fáciles de copiar mal desde el panel de Supabase. */
+const DB_URL = (process.env.SUPABASE_URL || '')
+  .trim()
+  .replace(/\/+$/, '')
+  .replace(/\/rest\/v1$/, '');
+const DB_KEY = (process.env.SUPABASE_KEY || '').trim();
 const HAY_DB = !!(DB_URL && DB_KEY);
 const CLAVE_EDITOR = process.env.EDITOR_PASS || '';
 
@@ -60,6 +65,7 @@ const RESERVA = [
 ];
 
 let catalogo = { enemigos: RESERVA.slice(), fuente:'reserva' };
+let fallaDb = HAY_DB ? 'todavía no he leído la base' : 'no hay claves puestas';
 
 async function cargarCatalogo(){
   if (!HAY_DB){ console.log('Sin base de datos: uso el contenido de reserva.'); return; }
@@ -67,9 +73,13 @@ async function cargarCatalogo(){
     const filas = await db('enemigos?select=*&order=id');
     if (filas && filas.length){
       catalogo = { enemigos: filas, fuente:'base de datos' };
+      fallaDb = null;
       console.log('Catálogo cargado: ' + filas.length + ' enemigos.');
+    } else {
+      fallaDb = 'la tabla de enemigos está vacía';
     }
   } catch(e){
+    fallaDb = e.message;
     console.log('No he podido leer la base, sigo con la reserva. ' + e.message);
   }
 }
@@ -259,7 +269,15 @@ io.on('connection', socket => {
     if (!CLAVE_EDITOR) return cb({ ok:false, err:'El editor está apagado. Falta poner EDITOR_PASS en Render.' });
     if (clave !== CLAVE_EDITOR) return cb({ ok:false, err:'Contraseña incorrecta.' });
     socket.data.editor = true;
-    cb({ ok:true, enemigos: catalogo.enemigos, fuente: catalogo.fuente, hayDb: HAY_DB });
+    cb({ ok:true, enemigos: catalogo.enemigos, fuente: catalogo.fuente,
+         hayDb: HAY_DB, falla: fallaDb });
+  });
+
+  socket.on('ed:recargar', async (_, cb) => {
+    if (!socket.data.editor) return cb({ ok:false, err:'No has entrado en el editor.' });
+    await cargarCatalogo();
+    for (const room of rooms.values()){ poblar(room); push(room); }
+    cb({ ok:true, enemigos: catalogo.enemigos, fuente: catalogo.fuente, falla: fallaDb });
   });
 
   socket.on('ed:guardar', async (fila, cb) => {
@@ -269,6 +287,8 @@ io.on('connection', socket => {
     if (!fila.id) return cb({ ok:false, err:'El identificador sólo admite letras y números.' });
     try {
       await guardarEnemigo(fila);
+      fallaDb = null;
+      if (catalogo.fuente !== 'base de datos') catalogo.fuente = 'base de datos';
       const i = catalogo.enemigos.findIndex(e => e.id === fila.id);
       if (i >= 0) catalogo.enemigos[i] = fila; else catalogo.enemigos.push(fila);
       // el cambio entra en las partidas que ya están abiertas, sin reiniciar
@@ -752,6 +772,7 @@ line-height:1.45;margin-bottom:18px}
       </div>
       <button class="big" id="guardar">Guardar</button>
       <button class="chip" id="nuevo" style="margin-left:8px">Nuevo enemigo</button>
+      <button class="chip" id="recargar" style="margin-left:8px">Recargar desde la base</button>
       <p class="err" id="e1"></p>
     </div>
   </div>
@@ -767,9 +788,10 @@ $('pasa').onclick = function(){
     lista = r.enemigos;
     $('puerta').className = 'hide';
     $('panel').className = '';
-    $('fuente').textContent = r.hayDb
-      ? 'Guardando en la base de datos.'
-      : 'Sin base de datos: los cambios se perderán al reiniciar.';
+    $('fuente').textContent = r.falla
+      ? 'La base no responde (' + r.falla + '). Estás viendo contenido de reserva.'
+      : 'Conectado a la base de datos. ' + r.enemigos.length + ' enemigos.';
+    $('fuente').style.color = r.falla ? '#E08C7A' : '';
     pinta(); elige(lista[0]);
   });
 };
@@ -800,6 +822,17 @@ $('nuevo').onclick = function(){
   $('id').value = ''; $('nom').value = ''; $('ltr').value = '';
   $('vid').value = 4; $('vel').value = 4; $('dan').value = '1-2';
   pinta(); $('id').focus();
+};
+$('recargar').onclick = function(){
+  s.emit('ed:recargar', null, function(r){
+    if (!r.ok){ $('e1').textContent = r.err; return; }
+    lista = r.enemigos;
+    $('fuente').textContent = r.falla
+      ? 'La base no responde (' + r.falla + '). Estás viendo contenido de reserva.'
+      : 'Conectado a la base de datos. ' + r.enemigos.length + ' enemigos.';
+    $('fuente').style.color = r.falla ? '#E08C7A' : '';
+    pinta(); elige(lista[0]);
+  });
 };
 $('guardar').onclick = function(){
   var partes = ($('dan').value || '1-2').split('-');
