@@ -39,41 +39,82 @@ function registerSockets(io){
         p.name = name || p.name;
       } else {
         if (room.players.size >= 6) return cb({ ok:false, err:'La sala está llena.' });
-        p = { token, name: name || 'Jugador', cls:null, x:0, y:0, online:true, left:0 };
+        p = { token, name: name || 'Jugador', color: board.primerColorLibre(room), online:true, left:0 };
         room.players.set(token, p);
       }
       socket.join(code);
       socket.data.code = code;
       socket.data.token = token;
       push(room);
-      cb({ ok:true, state: rooms.snapshot(room), me:{ token, cls: p.cls ? p.cls.id : null } });
+      const misHeroes = room.heroes.filter(h => h.dueno === token).map(h => h.id);
+      cb({ ok:true, state: rooms.snapshot(room), me:{ token, color:p.color, heroes:misHeroes } });
     });
 
+    /* elegir un héroe no quita a nadie de la sala: cada jugador puede llevar varios */
     socket.on('pick', (clsId, cb) => {
       const room = rooms.rooms.get(socket.data.code);
       if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
       const p = room.players.get(socket.data.token);
       if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
-      if (p.cls) return cb && cb({ ok:false, err:'Ya tienes héroe.' });
-      const taken = [...room.players.values()].some(o => o.cls && o.cls.id === clsId);
+      const taken = room.heroes.some(h => h.clsId === clsId);
       if (taken) return cb && cb({ ok:false, err:'Ese héroe lo ha cogido otro.' });
       const cls = board.CLASSES.find(c => c.id === clsId);
       if (!cls) return cb && cb({ ok:false, err:'Héroe desconocido.' });
       const spot = rooms.freeStart(room);
-      p.cls = cls; p.x = spot.x; p.y = spot.y;
+      const heroe = {
+        id:'h-'+cls.id, dueno:p.token, clsId:cls.id, nombre:cls.name, letra:cls.letter,
+        speed:cls.speed, alcance:cls.alcance, dano:cls.dano,
+        x:spot.x, y:spot.y, vida:cls.vida, max:cls.vida,
+        fat:0, maxFat:cls.fatiga, acciones:board.ACCIONES_POR_RONDA,
+        caido:false, senala:null
+      };
+      room.heroes.push(heroe);
       push(room);
-      cb && cb({ ok:true, cls:clsId });
+      const mios = room.heroes.filter(h => h.dueno === p.token).length;
+      cb && cb({ ok:true, cls:clsId, mios });
     });
 
-    socket.on('move', ({ x, y }, cb) => {
+    /* soltar un héroe propio: sólo antes de que empiece la batalla */
+    socket.on('soltar', (idHeroe, cb) => {
       const room = rooms.rooms.get(socket.data.code);
       if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
       const p = room.players.get(socket.data.token);
-      if (!p || !p.cls) return cb && cb({ ok:false, err:'Todavía no tienes héroe.' });
+      if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
+      if (!(room.ronda === 1 && room.turno === 'heroes'))
+        return cb && cb({ ok:false, err:'La partida ya ha empezado, no puedes soltar héroes.' });
+      const i = room.heroes.findIndex(h => h.id === idHeroe && h.dueno === p.token);
+      if (i < 0) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
+      room.heroes.splice(i, 1);
+      push(room);
+      cb && cb({ ok:true });
+    });
+
+    /* cambiar de color: rechaza el que ya lleve otro jugador */
+    socket.on('color', (id, cb) => {
+      const room = rooms.rooms.get(socket.data.code);
+      if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
+      const p = room.players.get(socket.data.token);
+      if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
+      const color = board.PALETA.find(c => c.id === id);
+      if (!color) return cb && cb({ ok:false, err:'Color desconocido.' });
+      const enUso = [...room.players.values()].some(o => o.token !== p.token && o.color === id);
+      if (enUso) return cb && cb({ ok:false, err:'Ese color ya lo lleva otro.' });
+      p.color = id;
+      push(room);
+      cb && cb({ ok:true, color:id });
+    });
+
+    socket.on('move', ({ heroe, x, y }, cb) => {
+      const room = rooms.rooms.get(socket.data.code);
+      if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
+      const p = room.players.get(socket.data.token);
+      if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
+      const h = room.heroes.find(o => o.id === heroe && o.dueno === p.token);
+      if (!h) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
       // el servidor decide: no se fía de lo que diga el móvil
-      const ok = rooms.reachable(room, p).some(c => c.x === x && c.y === y);
+      const ok = rooms.reachable(room, h).some(c => c.x === x && c.y === y);
       if (!ok) return cb && cb({ ok:false, err:'No llegas ahí.' });
-      p.x = x; p.y = y;
+      h.x = x; h.y = y;
       push(room);
       cb && cb({ ok:true });
     });
@@ -115,15 +156,17 @@ function registerSockets(io){
       }
     });
 
-    socket.on('senalar', (id, cb) => {
+    socket.on('senalar', ({ heroe, objetivo }, cb) => {
       const room = rooms.rooms.get(socket.data.code);
       if (!room) return cb && cb({ ok:false });
       const p = room.players.get(socket.data.token);
-      if (!p || !p.cls) return cb && cb({ ok:false });
+      if (!p) return cb && cb({ ok:false });
+      const h = room.heroes.find(o => o.id === heroe && o.dueno === p.token);
+      if (!h) return cb && cb({ ok:false });
       // señalar lo mismo otra vez lo quita
-      p.senala = (p.senala === id) ? null : id;
+      h.senala = (h.senala === objetivo) ? null : objetivo;
       push(room);
-      cb && cb({ ok:true, senala: p.senala });
+      cb && cb({ ok:true, senala: h.senala });
     });
 
     socket.on('disconnect', () => {

@@ -33,7 +33,6 @@ function draw(){
     c.style.width=cw+'px'; c.style.height=ch+'px';
     b.appendChild(c);
   }
-  var sz = Math.min(cw,ch)*0.74;
   (st.enemigos||[]).forEach(function(e){
     var cs = e.celdas || [[e.x,e.y]];
     var xs = cs.map(function(c){return c[0];}), ys = cs.map(function(c){return c[1];});
@@ -68,13 +67,22 @@ function draw(){
   });
   st.players.forEach(function(p){
     var d = document.createElement('div');
-    d.className = 'tok' + (p.online ? '' : ' off');
+    d.className = 'tok jugador' + (p.online ? '' : ' off');
     d.textContent = p.letter;
-    d.style.left = (p.x*cw + (cw-sz)/2)+'px';
-    d.style.top  = (p.y*ch + (ch-sz)/2)+'px';
-    d.style.width = sz+'px'; d.style.height = sz+'px';
-    d.style.fontSize = Math.max(12, sz*0.42)+'px';
+    d.style.left = (p.x*cw)+'px';
+    d.style.top  = (p.y*ch)+'px';
+    d.style.width = cw+'px'; d.style.height = ch+'px';
+    d.style.fontSize = Math.max(12, Math.min(cw,ch)*0.42)+'px';
+    d.style.borderColor = p.hex;
+    d.style.background = hexConAlpha(p.hex, 0.24);
+    d.style.color = p.hex;
     b.appendChild(d);
+    var np = document.createElement('div');
+    np.className = 'nombrecito';
+    np.textContent = p.name;
+    np.style.left = (p.x*cw + cw/2)+'px';
+    np.style.top  = (p.y*ch + ch + 1)+'px';
+    b.appendChild(np);
   });
   var l = document.getElementById('list');
   if (!st.players.length){ l.innerHTML = '<div class="empty">Nadie ha entrado todavía.</div>'; return; }
@@ -84,3 +92,11 @@ function draw(){
   }).join('');
 }
 window.addEventListener('resize', draw);
+
+/* pasa un "#rrggbb" a "rgba(r,g,b,alfa)", para pintar el relleno de la casilla del héroe */
+function hexConAlpha(hex, alfa){
+  var m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
+  if (!m) return hex;
+  var r = parseInt(m[1],16), g = parseInt(m[2],16), bl = parseInt(m[3],16);
+  return 'rgba(' + r + ',' + g + ',' + bl + ',' + alfa + ')';
+}

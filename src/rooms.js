@@ -80,17 +80,19 @@ function buscarHueco(room, bicho){
 
 function makeRoom(){
   const code = newCode();
-  const room = { code, players:new Map(), enemigos:[], created:Date.now() };
+  // ronda 1 con turno de los héroes: así arranca cualquier sala nueva, antes de empezar la batalla
+  const room = { code, players:new Map(), heroes:[], enemigos:[], created:Date.now(), ronda:1, turno:'heroes' };
   rooms.set(code, room);
   poblar(room);
   return code;
 }
 
-function occupied(room, x, y, exceptToken){
-  for (const [t,p] of room.players)
-    if (t !== exceptToken && p.cls && p.x===x && p.y===y) return true;
+/* ocupado por un héroe vivo o por un enemigo, sin contar a "exceptId" (su propio id) */
+function occupied(room, x, y, exceptId){
+  for (const h of room.heroes)
+    if (h.id !== exceptId && !h.caido && h.x===x && h.y===y) return true;
   for (const e of (room.enemigos||[])){
-    if (e.id === exceptToken) continue;
+    if (e.id === exceptId) continue;
     if ((e.celdas||[[e.x,e.y]]).some(c => c[0]===x && c[1]===y)) return true;
   }
   return false;
@@ -107,37 +109,48 @@ function snapshot(room){
   return {
     code: room.code,
     board: { w:board.W, h:board.H, walls:board.WALLS },
-    players: [...room.players.values()]
-      .filter(p => p.cls)
-      .map(p => ({
-        token:p.token, name:p.name, cls:p.cls.id, letter:p.cls.letter,
-        speed:p.cls.speed, x:p.x, y:p.y, online:p.online, senala:p.senala || null
-      })),
+    // las personas conectadas, con su color y cuántos héroes llevan cada una
+    jugadores: [...room.players.values()].map(p => ({
+      token:p.token, name:p.name, color:p.color, hex:board.hexDe(p.color), online:p.online,
+      heroes: room.heroes.filter(h => h.dueno === p.token).length
+    })),
+    // las fichas del tablero (se sigue llamando "players" para no romper las pantallas)
+    players: room.heroes.map(h => {
+      const dueno = room.players.get(h.dueno);
+      return {
+        id:h.id, token:h.dueno, name:h.nombre, cls:h.clsId, letter:h.letra,
+        speed:h.speed, x:h.x, y:h.y, vida:h.vida, max:h.max, fat:h.fat, maxFat:h.maxFat,
+        acciones:h.acciones, caido:h.caido, alcance:h.alcance, senala:h.senala || null,
+        color: dueno ? dueno.color : null, hex: dueno ? board.hexDe(dueno.color) : null,
+        online: dueno ? dueno.online : false
+      };
+    }),
+    paleta: board.PALETA.map(c => ({ ...c, libre: board.colorLibre(room, c.id) })),
     familia: room.familia || null,
     enemigos: (room.enemigos||[]).map(e => ({
       id:e.id, nombre:e.nombre, familia:e.familia, letra:e.letra,
       aro:e.aro, ficha:e.ficha, vida:e.vida, max:e.max,
       x:e.x, y:e.y, tam:e.tam || '1x1', celdas:e.celdas || [[e.x,e.y]],
-      // quién lo tiene señalado como objetivo ahora mismo
-      senalan: [...room.players.values()].filter(p => p.cls && p.senala === e.id).map(p => p.name)
+      // los nombres de los héroes que lo tienen señalado como objetivo ahora mismo
+      senalan: room.heroes.filter(h => !h.caido && h.senala === e.id).map(h => h.nombre)
     })),
-    taken: [...room.players.values()].filter(p=>p.cls).map(p=>p.cls.id)
+    taken: room.heroes.map(h => h.clsId)
   };
 }
 
 /* distancia real esquivando muros y fichas */
-function reachable(room, p){
-  const seen = new Set([p.x+','+p.y]);
+function reachable(room, heroe){
+  const seen = new Set([heroe.x+','+heroe.y]);
   const out = [];
-  let frontier = [{x:p.x,y:p.y,c:0}];
+  let frontier = [{x:heroe.x,y:heroe.y,c:0}];
   while (frontier.length){
     const n = frontier.shift();
     if (n.c > 0) out.push({x:n.x, y:n.y, c:n.c});
-    if (n.c === p.cls.speed) continue;
+    if (n.c === heroe.speed) continue;
     for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
       const nx = n.x+dx, ny = n.y+dy, k = nx+','+ny;
       if (!board.inBoard(nx,ny) || board.isWall(nx,ny)) continue;
-      if (occupied(room,nx,ny,p.token)) continue;
+      if (occupied(room,nx,ny,heroe.id)) continue;
       if (seen.has(k)) continue;
       seen.add(k);
       frontier.push({x:nx, y:ny, c:n.c+1});
@@ -155,6 +168,8 @@ function startCleanup(){
         if (!p.online && now - p.left > GRACE){
           if (p.pending) clearTimeout(p.pending);
           room.players.delete(t);
+          // sus héroes quedan huérfanos: se sueltan con él
+          room.heroes = room.heroes.filter(h => h.dueno !== t);
         }
       if (room.players.size === 0 && now - room.created > GRACE) rooms.delete(code);
     }
