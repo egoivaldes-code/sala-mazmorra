@@ -1,0 +1,38 @@
+:root{--stone:#161B21;--stone2:#212932;--wall:#39434F;--floor:#1C232B;
+--parchment:#E9E3D5;--dim:#8A94A0;--brass:#D3A63C;--moss:#6E9163;--teal:#4E8288;
+--line:rgba(233,227,213,.10);--serif:Spectral,Georgia,serif;
+--sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#0D1116;color:var(--parchment);font-family:var(--sans)}
+.board{position:relative;background:var(--floor);border:1px solid var(--wall);
+border-radius:3px;overflow:hidden}
+.cell{position:absolute;border-right:1px solid rgba(0,0,0,.35);
+border-bottom:1px solid rgba(0,0,0,.35)}
+.cell.wall{background:var(--wall)}
+.tok{position:absolute;display:flex;align-items:center;justify-content:center;
+border-radius:50%;font-family:var(--serif);font-weight:600;
+background:#2E3742;border:2px solid var(--brass);color:var(--brass);
+transition:left .18s ease,top .18s ease}
+.tok.me{box-shadow:0 0 0 3px rgba(211,166,60,.3)}
+.tok.off{opacity:.35;border-style:dashed}
+.tok.foe{border:0;border-radius:0;background:transparent;color:#E5A08C;
+text-shadow:0 1px 3px #000}
+.tok.foe.conficha{background-repeat:no-repeat;background-position:center center;
+background-size:contain;color:transparent;text-shadow:none}
+/* en el móvil no hay dibujo: hace falta algo que marque la casilla */
+.tok.foe.marca{background:#2A333E;border:2px solid #6B7A8A;border-radius:3px;color:#D6DEE8}
+/* la casilla se ilumina cuando alguien la señala como objetivo */
+.objetivo{position:absolute;border:2px solid var(--brass);border-radius:2px;
+background:rgba(211,166,60,.16);box-shadow:0 0 14px rgba(211,166,60,.35) inset;
+pointer-events:none;animation:latir 1.6s ease-in-out infinite}
+@keyframes latir{0%,100%{opacity:.55}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.objetivo{animation:none;opacity:.8}}
+.nombrecito{position:absolute;transform:translateX(-50%);white-space:nowrap;
+font-family:var(--serif);font-size:11px;color:var(--parchment);opacity:.72;
+text-shadow:0 1px 3px #000;pointer-events:none}
+.dot{position:absolute;border-radius:50%;background:rgba(110,145,99,.3);
+border:2px solid var(--moss);cursor:pointer}
+.dot.sel{background:rgba(211,166,60,.34);border-color:var(--brass)}
+button{font-family:var(--serif);cursor:pointer}
+:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.tok{transition:none}}

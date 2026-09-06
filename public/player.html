@@ -1,0 +1,75 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mazmorra</title>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+body{display:flex;justify-content:center;min-height:100dvh}
+.app{width:100%;max-width:440px;background:var(--stone);padding:14px;
+display:flex;flex-direction:column;min-height:100dvh}
+h1{font-family:var(--serif);font-size:18px;font-weight:600;margin:0 0 3px}
+p.sub{color:var(--dim);font-size:13px;margin:0 0 16px;line-height:1.4}
+input{width:100%;padding:14px;margin-bottom:9px;background:var(--stone2);
+border:1px solid var(--line);border-radius:4px;color:var(--parchment);
+font-family:var(--serif);font-size:17px}
+input#code{letter-spacing:.22em;text-transform:uppercase;text-align:center}
+.big{width:100%;padding:15px;background:var(--brass);color:#1A1408;border:0;
+border-radius:4px;font-size:16px;font-weight:600}
+.big[disabled]{opacity:.4}
+.err{color:#E08C7A;font-size:13px;min-height:18px;margin:8px 0 0}
+.heroes{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.hero{padding:16px 8px;background:var(--stone2);border:1px solid var(--line);
+border-radius:4px;color:var(--parchment);font-size:15px;font-weight:600}
+.hero small{display:block;color:var(--dim);font-weight:400;font-size:11px;
+margin-top:3px;font-family:var(--sans)}
+.hero[disabled]{opacity:.3}
+.board{width:100%;aspect-ratio:12/9;margin-bottom:12px}
+.who{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.who b{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;
+justify-content:center;background:#2E3742;border:2px solid var(--brass);
+color:var(--brass);font-family:var(--serif)}
+.who span{font-family:var(--serif);font-size:15px}
+.who i{margin-left:auto;color:var(--dim);font-size:11.5px;font-style:normal}
+.hint{color:var(--dim);font-size:12.5px;min-height:17px;margin:0 0 8px;line-height:1.35}
+.verb{width:100%;padding:17px;background:var(--stone2);border:1px solid var(--line);
+border-radius:4px;color:var(--parchment);font-size:16px;font-weight:600}
+.verb[aria-pressed="true"]{background:var(--brass);color:#1A1408;border-color:var(--brass)}
+.row{display:flex;gap:8px;margin-top:8px}
+.row button{flex:1;padding:15px;border-radius:4px;font-size:15px;font-weight:600;
+border:1px solid var(--line)}
+.go{background:var(--brass);color:#1A1408;border-color:var(--brass)}
+.back{background:transparent;color:var(--dim)}
+.hide{display:none}
+</style></head><body>
+<div class="app">
+  <div id="s1">
+    <h1>Entrar en la partida</h1>
+    <p class="sub">Escribe el código que sale en la tele.</p>
+    <input id="code" maxlength="4" placeholder="CÓDIGO" autocomplete="off">
+    <input id="name" maxlength="14" placeholder="Tu nombre" autocomplete="off">
+    <button class="big" id="enter">Entrar</button>
+    <p class="err" id="e1"></p>
+  </div>
+
+  <div id="s2" class="hide">
+    <h1>Elige héroe</h1>
+    <p class="sub">Cada uno lleva uno distinto.</p>
+    <div class="heroes" id="heroes"></div>
+    <p class="err" id="e2"></p>
+  </div>
+
+  <div id="s3" class="hide">
+    <div class="who"><b id="ltr"></b><span id="nm"></span><i id="conn"></i></div>
+    <div class="board" id="b"></div>
+    <p class="hint" id="hint"></p>
+    <button class="verb" id="mv">Mover</button>
+    <div class="row hide" id="cf">
+      <button class="back" id="bk">Atrás</button>
+      <button class="go" id="ok">Confirmar</button>
+    </div>
+  </div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/wake.js"></script>
+<script src="/player.js"></script>
+</body></html>
