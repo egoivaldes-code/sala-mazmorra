@@ -175,8 +175,14 @@ function moverYAtacar(room, e, h){
   if (separacion(e, h) > alcance) acercarse(room, e, h);
   if (separacion(e, h) <= alcance){
     const dano = tirada(e.dano || [1,2]);
-    herir(room, h, dano);
+    // se narra antes de herir: si el golpe tira al héroe, que se cuente en
+    // ese orden ("ataca" y LUEGO "cae al suelo"), no al revés
     relatar(room, e.nombre + ' ataca a ' + h.nombre + ' (' + dano + ').');
+    herir(room, h, dano);
+  } else {
+    // si no ha llegado a tiro, que quede constancia: si no, una ronda entera
+    // de enemigos que sólo caminan no deja ni una frase en la tele
+    relatar(room, e.nombre + ' avanza.');
   }
 }
 

@@ -107,6 +107,17 @@ function buscarSitio(room, pieza){
   return null;
 }
 
+/* Igual que buscarSitio, pero mirando todo el tablero: sólo para la
+   salvaguarda de que quede al menos un enemigo en pie. */
+function buscarSitioEntero(room, pieza){
+  for (let x = 0; x < board.W; x++)
+    for (let y = 0; y < board.H; y++){
+      const celdas = despliegue(room, x, y, pieza.tam, pieza.id);
+      if (celdas) return { x, y, celdas };
+    }
+  return null;
+}
+
 /* Forma la banda de la sala con el presupuesto de la dificultad elegida y el
    número de héroes en la mesa, y la coloca en el tablero. Se llama cada vez
    que cambia el número de héroes o la dificultad: se rehace desde cero. */
@@ -148,19 +159,35 @@ function poblar(room){
     tam:  v.tam  || base.tam  || '1x1',
     rango: v.rango || 'esbirro',
     velocidad: v.velocidad || base.velocidad || 4,
-    dano: v.dano || base.dano || [1,2]
+    dano: v.dano || base.dano || [1,2],
+    alcance: v.alcance || base.alcance || 1
   }));
 
   // las grandes van primero: si no, los esbirros les quitan el hueco
   const grandes = piezas.filter(p => { const m = board.medidas(p.tam); return m.an*m.al > 1; });
   const pequenas = piezas.filter(p => !grandes.includes(p));
+  const enOrden = [...grandes, ...pequenas];
 
-  [...grandes, ...pequenas].forEach(pieza => {
+  enOrden.forEach(pieza => {
     const sitio = buscarSitio(room, pieza);
     if (!sitio) return;
     pieza.x = sitio.x; pieza.y = sitio.y; pieza.celdas = sitio.celdas;
     room.enemigos.push(pieza);
   });
+
+  // salvaguarda: si ninguno cupo en la mitad derecha (por ejemplo, con el
+  // tablero ya muy ocupado), mete al menos uno donde sea. Si no, la sala se
+  // queda sin enemigos y revisarFinal lo confunde con una victoria instantánea.
+  if (!room.enemigos.length && enOrden.length){
+    for (const pieza of enOrden){
+      const sitio = buscarSitioEntero(room, pieza);
+      if (sitio){
+        pieza.x = sitio.x; pieza.y = sitio.y; pieza.celdas = sitio.celdas;
+        room.enemigos.push(pieza);
+        break;
+      }
+    }
+  }
 }
 
 function makeRoom(){
