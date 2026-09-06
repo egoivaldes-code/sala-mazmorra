@@ -6,7 +6,7 @@ fetch('/api/clases').then(function(r){ return r.json(); }).then(function(clases)
 });
 
 function init(){
-var s = io(), st = null, me = null, mode = false, pend = null, activo = null;
+var s = io(), st = null, me = null, modo = null, pend = null, activo = null;
 
 /* el móvil te recuerda: llave guardada aquí */
 var token;
@@ -62,6 +62,30 @@ function pasaAJugar(){
   elegirActivo();
   show(3);
   render();
+}
+
+/* la misma cuenta que separacion() en el servidor: distancia en cruz entre
+   cualquier casilla de "a" y cualquier casilla de "b" */
+function separacionCliente(a, b){
+  var ca = a.celdas || [[a.x,a.y]], cb = b.celdas || [[b.x,b.y]];
+  var min = Infinity;
+  for (var i=0;i<ca.length;i++) for (var j=0;j<cb.length;j++){
+    var d = Math.abs(ca[i][0]-cb[j][0]) + Math.abs(ca[i][1]-cb[j][1]);
+    if (d < min) min = d;
+  }
+  return min;
+}
+/* el servidor decide de verdad; esto es sólo para no ofrecer botones que
+   luego van a fallar */
+function puedeActuar(h){
+  return !!h && !h.caido && h.acciones > 0 && st.turno === 'heroes' && !st.fin;
+}
+function caidoAdyacente(h){
+  for (var i=0;i<st.players.length;i++){
+    var o = st.players[i];
+    if (o.caido && separacionCliente(h,o) <= 1) return o;
+  }
+  return null;
 }
 
 document.getElementById('enter').onclick = function(){
@@ -175,7 +199,7 @@ function pintaTabs(){
     b.className = 'tab';
     b.setAttribute('aria-pressed', h.id === activo);
     b.textContent = h.name + ' (' + h.acciones + ')';
-    b.onclick = function(){ activo = h.id; mode = false; pend = null; render(); };
+    b.onclick = function(){ activo = h.id; modo = null; pend = null; render(); };
     box.appendChild(b);
   });
 }
@@ -206,13 +230,61 @@ s.on('connect', function(){
     function(r){ if (r.ok){ st = r.state; me = r.me; pintaTodo(); } });
 });
 
-document.getElementById('mv').onclick = function(){ mode = !mode; pend = null; render(); };
+document.getElementById('mv').onclick = function(){
+  if (!puedeActuar(heroeActivo())) return;
+  modo = (modo === 'mover') ? null : 'mover';
+  pend = null; render();
+};
+document.getElementById('at').onclick = function(){
+  if (!puedeActuar(heroeActivo())) return;
+  modo = (modo === 'atacar') ? null : 'atacar';
+  pend = null; render();
+};
 document.getElementById('bk').onclick = function(){ pend = null; render(); };
 document.getElementById('ok').onclick = function(){
-  s.emit('move', { heroe:activo, x:pend.x, y:pend.y }, function(r){
+  if (modo === 'mover'){
+    s.emit('move', { heroe:activo, x:pend.x, y:pend.y }, function(r){
+      if (!r.ok) document.getElementById('hint').textContent = r.err;
+      pend = null; modo = null; render();
+    });
+  } else if (modo === 'atacar'){
+    s.emit('atacar', { heroe:activo, objetivo:pend.enemigo }, function(r){
+      pend = null; modo = null;
+      if (!r.ok){ document.getElementById('hint').textContent = r.err; render(); return; }
+      render();
+      if (r.simbolo) mostrarSimbolo(r.nombre);
+    });
+  }
+};
+document.getElementById('levantar').onclick = function(){
+  var h = heroeActivo();
+  if (!puedeActuar(h)) return;
+  var caido = caidoAdyacente(h);
+  if (!caido) return;
+  s.emit('levantar', { heroe:activo, aQuien:caido.id }, function(r){
     if (!r.ok) document.getElementById('hint').textContent = r.err;
-    pend = null; mode = false; render();
+    render();
   });
+};
+document.getElementById('finronda').onclick = function(){
+  if (st.turno !== 'heroes' || st.fin) return;
+  s.emit('fin_ronda', null, function(r){
+    if (!r.ok) document.getElementById('hint').textContent = r.err;
+  });
+};
+
+function mostrarSimbolo(nombre){
+  document.getElementById('simboloTexto').textContent =
+    '¡Símbolo al golpear a ' + nombre + '! Elige qué pasa.';
+  document.getElementById('modalSimbolo').className = 'modal';
+}
+document.getElementById('simDano').onclick = function(){
+  document.getElementById('modalSimbolo').className = 'modal hide';
+  s.emit('simbolo', { heroe:activo, opcion:'dano' }, function(){ render(); });
+};
+document.getElementById('simEmpujar').onclick = function(){
+  document.getElementById('modalSimbolo').className = 'modal hide';
+  s.emit('simbolo', { heroe:activo, opcion:'empujar' }, function(){ render(); });
 };
 
 function reach(h){
@@ -239,6 +311,34 @@ function reach(h){
   return out;
 }
 
+function pintaBarras(h){
+  document.getElementById('barraVida').style.width =
+    Math.max(0, Math.min(100, (h.vida / h.max) * 100)) + '%';
+  document.getElementById('barraFatiga').style.width =
+    (h.maxFat ? Math.max(0, Math.min(100, (h.fat / h.maxFat) * 100)) : 0) + '%';
+  var caja = document.getElementById('acciones');
+  caja.innerHTML = '';
+  for (var i=0;i<2;i++){
+    var p = document.createElement('span');
+    p.className = 'punto' + (i < h.acciones ? ' lleno' : '');
+    caja.appendChild(p);
+  }
+}
+
+function actualizaHint(h){
+  var el = document.getElementById('hint');
+  if (st.fin === 'victoria'){ el.textContent = '¡Victoria! La banda ha caído.'; return; }
+  if (st.fin === 'derrota'){ el.textContent = 'Derrota. Todos los héroes han caído.'; return; }
+  if (st.turno !== 'heroes'){ el.textContent = 'Los enemigos están actuando...'; return; }
+  if (h.caido){ el.textContent = 'Estás caído. Espera a que te levanten.'; return; }
+  if (modo === 'mover'){ el.textContent = 'Toca a dónde quieres ir. Puedes moverte ' + h.speed + ' casillas.'; return; }
+  if (modo === 'atacar'){ el.textContent = 'Toca a un enemigo a tu alcance (' + h.alcance + ').'; return; }
+  var mio = (st.enemigos||[]).filter(function(x){
+    return x.senalan && x.senalan.indexOf(h.name) >= 0; })[0];
+  el.textContent = mio ? 'Señalas a ' + mio.nombre + '. Tócalo otra vez para soltarlo.'
+                        : 'Toca un enemigo para señalarlo, o usa Mover/Atacar.';
+}
+
 function render(){
   if (!st) return;
   elegirActivo();
@@ -247,6 +347,7 @@ function render(){
   var mj = miJugador();
   document.getElementById('ltr').textContent = h.letter;
   document.getElementById('nm').textContent = (mj ? mj.name + ' · ' : '') + h.name;
+  pintaBarras(h);
 
   var b = document.getElementById('b');
   var cw = b.clientWidth / st.board.w, ch = b.clientHeight / st.board.h;
@@ -272,16 +373,26 @@ function render(){
       o.style.width = (anc*cw)+'px'; o.style.height = (alt*ch)+'px';
       b.appendChild(o);
     }
+    var enAlcance = modo === 'atacar' && separacionCliente(h, e) <= h.alcance;
+    var elegido = pend && pend.enemigo === e.id;
     var d = document.createElement('div');
-    d.className = 'tok foe marca';
+    d.className = 'tok foe marca' + (enAlcance ? ' enalcance' : '') + (elegido ? ' sel' : '');
     d.textContent = e.letra;
-    d.title = e.nombre;
+    d.title = e.nombre + ' (' + e.vida + '/' + e.max + ')';
     d.style.left = (x0*cw)+'px';
     d.style.top  = (y0*ch)+'px';
     d.style.width = (anc*cw)+'px'; d.style.height = (alt*ch)+'px';
     d.style.fontSize = Math.max(10, Math.min(anc*cw, alt*ch)*0.42)+'px';
     d.style.cursor = 'pointer';
-    d.onclick = function(){ s.emit('senalar', { heroe:activo, objetivo:e.id }, function(){}); };
+    d.onclick = function(){
+      if (modo === 'atacar'){
+        if (!enAlcance) return;
+        pend = { enemigo:e.id };
+        render();
+      } else {
+        s.emit('senalar', { heroe:activo, objetivo:e.id }, function(){});
+      }
+    };
     b.appendChild(d);
   });
   st.players.forEach(function(o){
@@ -292,10 +403,11 @@ function render(){
     d.style.top  = (o.y*ch + (ch-sz)/2)+'px';
     d.style.width = sz+'px'; d.style.height = sz+'px';
     d.style.fontSize = Math.max(11, sz*0.44)+'px';
+    if (o.caido) d.style.opacity = '0.4';
     b.appendChild(d);
   });
 
-  if (mode){
+  if (modo === 'mover'){
     var ds = Math.min(cw,ch)*0.64;
     reach(h).forEach(function(c){
       var sel = pend && pend.x === c.x && pend.y === c.y;
@@ -309,16 +421,21 @@ function render(){
     });
   }
 
-  document.getElementById('mv').setAttribute('aria-pressed', mode);
+  var activo_ = puedeActuar(h);
+  document.getElementById('mv').disabled = !activo_;
+  document.getElementById('at').disabled = !activo_;
+  document.getElementById('mv').setAttribute('aria-pressed', modo === 'mover');
+  document.getElementById('at').setAttribute('aria-pressed', modo === 'atacar');
   document.getElementById('cf').className = pend ? 'row' : 'row hide';
-  document.getElementById('hint').textContent = mode
-    ? 'Toca a dónde quieres ir. Puedes moverte ' + h.speed + ' casillas.'
-    : (function(){
-        var mio = (st.enemigos||[]).filter(function(x){
-          return x.senalan && x.senalan.indexOf(h.name) >= 0; })[0];
-        return mio ? 'Señalas a ' + mio.nombre + '. Tócalo otra vez para soltarlo.'
-                   : 'Toca un enemigo para señalarlo en la tele.';
-      })();
+
+  var caido = caidoAdyacente(h);
+  var btnLevantar = document.getElementById('levantar');
+  btnLevantar.className = caido ? 'secundario' : 'secundario hide';
+  btnLevantar.disabled = !activo_;
+
+  document.getElementById('finronda').disabled = (st.turno !== 'heroes' || !!st.fin);
+
+  actualizaHint(h);
 }
 window.addEventListener('resize', render);
 }

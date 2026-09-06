@@ -40,6 +40,14 @@ border-radius:4px;color:var(--dim);font-size:12px}
 color:var(--parchment);font-size:13px;white-space:nowrap;flex-shrink:0}
 .tab[aria-pressed="true"]{border-color:var(--brass);background:#282F38}
 .who{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.barras{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.barra{flex:1;height:8px;background:var(--stone2);border-radius:4px;overflow:hidden}
+.relleno{height:100%;border-radius:4px;transition:width .2s ease}
+.relleno.vida{background:var(--moss)}
+.relleno.fatiga{background:var(--teal)}
+.acciones{display:flex;gap:4px;flex-shrink:0}
+.punto{width:10px;height:10px;border-radius:50%;border:2px solid var(--brass);display:block}
+.punto.lleno{background:var(--brass)}
 .who b{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;
 justify-content:center;background:#2E3742;border:2px solid var(--brass);
 color:var(--brass);font-family:var(--serif)}
@@ -49,11 +57,28 @@ color:var(--brass);font-family:var(--serif)}
 .verb{width:100%;padding:17px;background:var(--stone2);border:1px solid var(--line);
 border-radius:4px;color:var(--parchment);font-size:16px;font-weight:600}
 .verb[aria-pressed="true"]{background:var(--brass);color:#1A1408;border-color:var(--brass)}
+.verb[disabled]{opacity:.35}
+.verbos{display:flex;gap:8px}
+.verbos .verb{width:auto;flex:1}
 .row{display:flex;gap:8px;margin-top:8px}
 .row button{flex:1;padding:15px;border-radius:4px;font-size:15px;font-weight:600;
 border:1px solid var(--line)}
 .go{background:var(--brass);color:#1A1408;border-color:var(--brass)}
 .back{background:transparent;color:var(--dim)}
+.secundario{width:100%;padding:13px;margin-top:8px;background:transparent;
+border:1px solid var(--line);border-radius:4px;color:var(--parchment);font-size:14px;font-weight:600}
+.secundario[disabled]{opacity:.35}
+.secundario.hide{display:none}
+.tok.foe.enalcance{box-shadow:0 0 0 2px var(--brass) inset}
+.tok.foe.sel{background:var(--brass);border-color:var(--brass);color:#1A1408}
+.modal{position:fixed;inset:0;background:rgba(13,17,22,.92);display:flex;
+align-items:center;justify-content:center;padding:20px;z-index:10}
+.modal.hide{display:none}
+.modalCaja{width:100%;max-width:380px;text-align:center}
+.modalCaja h1{font-size:22px;margin:0 0 10px}
+.modalCaja p{color:var(--dim);font-size:14px;margin:0 0 20px;line-height:1.4}
+.grande{width:100%;padding:22px;margin-bottom:10px;background:var(--stone2);
+border:1px solid var(--line);border-radius:6px;color:var(--parchment);font-size:17px;font-weight:600}
 .hide{display:none}
 </style></head><body>
 <div class="app">
@@ -79,13 +104,32 @@ border:1px solid var(--line)}
   <div id="s3" class="hide">
     <div class="tabs hide" id="tabs"></div>
     <div class="who"><b id="ltr"></b><span id="nm"></span><i id="conn"></i></div>
+    <div class="barras">
+      <div class="barra"><div class="relleno vida" id="barraVida"></div></div>
+      <div class="barra"><div class="relleno fatiga" id="barraFatiga"></div></div>
+      <div class="acciones" id="acciones"></div>
+    </div>
     <div class="board" id="b"></div>
     <p class="hint" id="hint"></p>
-    <button class="verb" id="mv">Mover</button>
+    <div class="verbos">
+      <button class="verb" id="mv">Mover</button>
+      <button class="verb" id="at">Atacar</button>
+    </div>
     <div class="row hide" id="cf">
       <button class="back" id="bk">Atrás</button>
       <button class="go" id="ok">Confirmar</button>
     </div>
+    <button class="secundario hide" id="levantar">Levantar compañero</button>
+    <button class="secundario" id="finronda">Fin de ronda del grupo</button>
+  </div>
+</div>
+
+<div class="modal hide" id="modalSimbolo">
+  <div class="modalCaja">
+    <h1>Símbolo</h1>
+    <p id="simboloTexto"></p>
+    <button class="grande" id="simDano">+2 de daño</button>
+    <button class="grande" id="simEmpujar">Empujar</button>
   </div>
 </div>
 <script src="/socket.io/socket.io.js"></script>

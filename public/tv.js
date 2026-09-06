@@ -59,9 +59,8 @@ function draw(){
     b.appendChild(d);
     var n = document.createElement('div');
     n.className = 'nombrecito';
-    n.textContent = (e.senalan && e.senalan.length)
-      ? e.nombre + ' ← ' + e.senalan.join(', ')
-      : e.nombre;
+    n.textContent = e.nombre + ' (' + e.vida + '/' + e.max + ')' +
+      ((e.senalan && e.senalan.length) ? ' ← ' + e.senalan.join(', ') : '');
     if (e.senalan && e.senalan.length) n.style.opacity = '1';
     n.style.left = (x0*cw + anc*cw/2)+'px';
     n.style.top  = (y0*ch + alt*ch + 1)+'px';
@@ -87,9 +86,10 @@ function draw(){
     b.appendChild(np);
   });
   var l = document.getElementById('list');
-  if (!st.players.length) l.innerHTML = '<div class="empty">Nadie ha entrado todavía.</div>';
-  else l.innerHTML = st.players.map(function(p){
-    return '<div class="pl"><b>'+p.letter+'</b>'+p.name+
+  if (!st.jugadores.length) l.innerHTML = '<div class="empty">Nadie ha entrado todavía.</div>';
+  else l.innerHTML = st.jugadores.map(function(p){
+    return '<div class="pl"><b style="background:'+p.hex+';border-color:'+p.hex+'"></b>'+p.name+
+      ' <span style="color:var(--dim);font-size:11px">('+p.heroes+' héroe'+(p.heroes===1?'':'s')+')</span>' +
       '<s>'+(p.online?'':'sin conexión')+'</s></div>';
   }).join('');
 
@@ -98,6 +98,13 @@ function draw(){
   var banda = st.banda || { gasto:0, heroes:0 };
   document.getElementById('banda').textContent =
     (st.enemigos||[]).length + ' enemigos · ' + banda.gasto + ' puntos de banda · ' + banda.heroes + ' héroes';
+
+  var turnoTexto = st.fin === 'victoria' ? '¡Victoria! La banda ha caído.'
+    : st.fin === 'derrota' ? 'Derrota. Todos los héroes han caído.'
+    : 'Ronda ' + st.ronda + ' · Turno de ' + (st.turno === 'heroes' ? 'los héroes' : 'los enemigos');
+  var relato = (st.relato || []).map(function(f){ return '<div>' + f + '</div>'; }).join('');
+  document.getElementById('estado').innerHTML =
+    '<div class="turnoinfo">' + turnoTexto + '</div>' + '<div class="relato">' + relato + '</div>';
 }
 window.addEventListener('resize', draw);
 

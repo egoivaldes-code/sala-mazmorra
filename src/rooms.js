@@ -166,7 +166,8 @@ function poblar(room){
 function makeRoom(){
   const code = newCode();
   // ronda 1 con turno de los héroes: así arranca cualquier sala nueva, antes de empezar la batalla
-  const room = { code, players:new Map(), heroes:[], enemigos:[], created:Date.now(), ronda:1, turno:'heroes' };
+  const room = { code, players:new Map(), heroes:[], enemigos:[], created:Date.now(),
+                  ronda:1, turno:'heroes', fin:null, relato:[] };
   rooms.set(code, room);
   poblar(room);
   return code;
@@ -213,6 +214,7 @@ function snapshot(room){
     paleta: board.PALETA.map(c => ({ ...c, libre: board.colorLibre(room, c.id) })),
     dificultad: room.dificultad || 'normal',
     banda: { gasto: room.gasto || 0, heroes: room.heroes.length },
+    ronda: room.ronda, turno: room.turno, fin: room.fin || null, relato: room.relato || [],
     familia: room.familia || null,
     enemigos: (room.enemigos||[]).map(e => ({
       id:e.id, nombre:e.nombre, familia:e.familia, letra:e.letra,
@@ -269,6 +271,6 @@ function startCleanup(){
 
 module.exports = {
   rooms, GRACE, AVISO,
-  makeRoom, occupied, freeStart, snapshot, alcanceDe, poblar,
+  makeRoom, occupied, freeStart, snapshot, alcanceDe, despliegue, poblar,
   startCleanup
 };

@@ -3,6 +3,7 @@ const board = require('./board');
 const config = require('./config');
 const catalog = require('./catalog');
 const rooms = require('./rooms');
+const combat = require('./combat');
 
 function registerSockets(io){
   const push = room => io.to(room.code).emit('state', rooms.snapshot(room));
@@ -129,13 +130,131 @@ function registerSockets(io){
       if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
       const h = room.heroes.find(o => o.id === heroe && o.dueno === p.token);
       if (!h) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
+      const err = compruebaTurno(room, h);
+      if (err) return cb && cb({ ok:false, err });
       // el servidor decide: no se fía de lo que diga el móvil.
       // puede tirar de fatiga para llegar más lejos de lo que da su velocidad.
       const destino = rooms.alcanceDe(room, h, h.speed + h.fat).find(c => c.x === x && c.y === y);
       if (!destino) return cb && cb({ ok:false, err:'No llegas ahí.' });
       if (destino.c > h.speed) h.fat -= (destino.c - h.speed);
       h.x = x; h.y = y;
+      h.acciones--;
       push(room);
+      cb && cb({ ok:true });
+    });
+
+    /* comprobaciones comunes a cualquier acción de combate de un héroe:
+       que sea su turno, que no esté caído, que le queden acciones, que la
+       batalla no haya terminado y que no tenga un símbolo pendiente */
+    function compruebaTurno(room, h){
+      if (room.fin) return 'La batalla ha terminado.';
+      if (room.turno !== 'heroes') return 'No es el turno de los héroes.';
+      if (h.caido) return 'Está caído.';
+      if (h.pendiente) return 'Resuelve primero el símbolo pendiente.';
+      if (h.acciones <= 0) return 'No le quedan acciones.';
+      return null;
+    }
+
+    /* ataca a un enemigo a su alcance; si sobrevive, hay un 40% de que salga
+       un símbolo y el jugador tenga que decidir qué hacer con él */
+    socket.on('atacar', ({ heroe, objetivo }, cb) => {
+      const room = rooms.rooms.get(socket.data.code);
+      if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
+      const p = room.players.get(socket.data.token);
+      if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
+      const h = room.heroes.find(o => o.id === heroe && o.dueno === p.token);
+      if (!h) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
+      const err = compruebaTurno(room, h);
+      if (err) return cb && cb({ ok:false, err });
+      const e = room.enemigos.find(x => x.id === objetivo);
+      if (!e) return cb && cb({ ok:false, err:'Ese enemigo ya no está.' });
+      if (combat.separacion(h, e) > h.alcance) return cb && cb({ ok:false, err:'Fuera de alcance.' });
+
+      h.acciones--;
+      const dano = combat.tirada(h.dano);
+      const nombreEnemigo = e.nombre;
+      combat.herir(room, e, dano);
+      combat.relatar(room, h.nombre + ' ataca a ' + nombreEnemigo + ' (' + dano + ').');
+
+      const sigueVivo = room.enemigos.includes(e);
+      if (sigueVivo && Math.random() < 0.4){
+        h.pendiente = { objetivo: e.id };
+        push(room);
+        return cb && cb({ ok:true, simbolo:true, nombre:nombreEnemigo });
+      }
+      push(room);
+      cb && cb({ ok:true, simbolo:false });
+    });
+
+    /* resuelve el símbolo que dejó pendiente el último ataque */
+    socket.on('simbolo', ({ heroe, opcion }, cb) => {
+      const room = rooms.rooms.get(socket.data.code);
+      if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
+      const p = room.players.get(socket.data.token);
+      if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
+      const h = room.heroes.find(o => o.id === heroe && o.dueno === p.token);
+      if (!h) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
+      if (!h.pendiente) return cb && cb({ ok:false, err:'No hay símbolo pendiente.' });
+      const e = room.enemigos.find(x => x.id === h.pendiente.objetivo);
+      if (e){
+        if (opcion === 'dano'){
+          combat.herir(room, e, 2);
+          combat.relatar(room, h.nombre + ' aprovecha el símbolo: 2 de daño más a ' + e.nombre + '.');
+        } else if (opcion === 'empujar'){
+          // una casilla en la dirección contraria al héroe, por el eje donde más se separan
+          const dx = e.x - h.x, dy = e.y - h.y;
+          const destino = Math.abs(dx) >= Math.abs(dy)
+            ? { x: e.x + Math.sign(dx || 1), y: e.y }
+            : { x: e.x, y: e.y + Math.sign(dy || 1) };
+          if (combat.colocar(room, e, destino.x, destino.y))
+            combat.relatar(room, h.nombre + ' empuja a ' + e.nombre + '.');
+        }
+      }
+      h.pendiente = null;
+      push(room);
+      cb && cb({ ok:true });
+    });
+
+    /* levanta a un compañero caído y adyacente: se levanta con media vida y sin acciones */
+    socket.on('levantar', ({ heroe, aQuien }, cb) => {
+      const room = rooms.rooms.get(socket.data.code);
+      if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
+      const p = room.players.get(socket.data.token);
+      if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
+      const h = room.heroes.find(o => o.id === heroe && o.dueno === p.token);
+      if (!h) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
+      const err = compruebaTurno(room, h);
+      if (err) return cb && cb({ ok:false, err });
+      const caido = room.heroes.find(o => o.id === aQuien);
+      if (!caido || !caido.caido) return cb && cb({ ok:false, err:'No hay nadie caído ahí.' });
+      if (combat.separacion(h, caido) > 1) return cb && cb({ ok:false, err:'Tienes que estar a su lado.' });
+
+      h.acciones--;
+      caido.caido = false;
+      caido.vida = Math.max(1, Math.floor(caido.max / 2));
+      caido.acciones = 0;
+      combat.relatar(room, h.nombre + ' levanta a ' + caido.nombre + '.');
+      push(room);
+      cb && cb({ ok:true });
+    });
+
+    /* el grupo decide que ya ha hecho todo lo que quería: pasa el turno a
+       los enemigos y, poco después, ellos actúan solos */
+    socket.on('fin_ronda', (_, cb) => {
+      const room = rooms.rooms.get(socket.data.code);
+      if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
+      if (room.fin) return cb && cb({ ok:false, err:'La batalla ha terminado.' });
+      if (room.turno !== 'heroes') return cb && cb({ ok:false, err:'Ya no es el turno de los héroes.' });
+      if (room.heroes.some(h => h.pendiente))
+        return cb && cb({ ok:false, err:'Hay un símbolo pendiente por resolver.' });
+      room.turno = 'enemigos';
+      push(room);
+      setTimeout(() => {
+        if (rooms.rooms.has(room.code)){
+          combat.turnoEnemigos(room);
+          push(room);
+        }
+      }, 600);
       cb && cb({ ok:true });
     });
 
