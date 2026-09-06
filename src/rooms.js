@@ -121,7 +121,7 @@ function snapshot(room){
         id:h.id, token:h.dueno, name:h.nombre, cls:h.clsId, letter:h.letra,
         speed:h.speed, x:h.x, y:h.y, vida:h.vida, max:h.max, fat:h.fat, maxFat:h.maxFat,
         acciones:h.acciones, caido:h.caido, alcance:h.alcance, senala:h.senala || null,
-        color: dueno ? dueno.color : null, hex: dueno ? board.hexDe(dueno.color) : null,
+        color: dueno ? dueno.color : 'hueso', hex: dueno ? board.hexDe(dueno.color) : board.hexDe('hueso'),
         online: dueno ? dueno.online : false
       };
     }),
@@ -138,19 +138,23 @@ function snapshot(room){
   };
 }
 
-/* distancia real esquivando muros y fichas */
-function reachable(room, heroe){
-  const seen = new Set([heroe.x+','+heroe.y]);
+/* Hasta dónde puede llegar una unidad (héroe, o mañana un enemigo grande) en
+   "pasos" casillas en cruz, esquivando muros y fichas.
+   Al pasar sólo cuenta su casilla de referencia (regla de Descent); pero una
+   casilla sólo entra en el resultado si despliegue() dice que ahí cabe entera. */
+function alcanceDe(room, unidad, pasos){
+  const seen = new Set([unidad.x+','+unidad.y]);
   const out = [];
-  let frontier = [{x:heroe.x,y:heroe.y,c:0}];
+  let frontier = [{x:unidad.x, y:unidad.y, c:0}];
   while (frontier.length){
     const n = frontier.shift();
-    if (n.c > 0) out.push({x:n.x, y:n.y, c:n.c});
-    if (n.c === heroe.speed) continue;
+    if (n.c > 0 && despliegue(room, n.x, n.y, unidad.tam, unidad.id))
+      out.push({x:n.x, y:n.y, c:n.c});
+    if (n.c === pasos) continue;
     for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
       const nx = n.x+dx, ny = n.y+dy, k = nx+','+ny;
       if (!board.inBoard(nx,ny) || board.isWall(nx,ny)) continue;
-      if (occupied(room,nx,ny,heroe.id)) continue;
+      if (occupied(room,nx,ny,unidad.id)) continue;
       if (seen.has(k)) continue;
       seen.add(k);
       frontier.push({x:nx, y:ny, c:n.c+1});
@@ -168,8 +172,8 @@ function startCleanup(){
         if (!p.online && now - p.left > GRACE){
           if (p.pending) clearTimeout(p.pending);
           room.players.delete(t);
-          // sus héroes quedan huérfanos: se sueltan con él
-          room.heroes = room.heroes.filter(h => h.dueno !== t);
+          // sus héroes se quedan en el tablero, sólo se quedan sin dueño
+          room.heroes.forEach(h => { if (h.dueno === t) h.dueno = null; });
         }
       if (room.players.size === 0 && now - room.created > GRACE) rooms.delete(code);
     }
@@ -178,6 +182,6 @@ function startCleanup(){
 
 module.exports = {
   rooms, GRACE, AVISO,
-  makeRoom, occupied, freeStart, snapshot, reachable, poblar,
+  makeRoom, occupied, freeStart, snapshot, alcanceDe, poblar,
   startCleanup
 };

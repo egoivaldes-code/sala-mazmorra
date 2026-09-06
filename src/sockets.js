@@ -42,6 +42,8 @@ function registerSockets(io){
         p = { token, name: name || 'Jugador', color: board.primerColorLibre(room), online:true, left:0 };
         room.players.set(token, p);
       }
+      // si volvió con el mismo token, recupera los héroes que se quedaron huérfanos al desconectarse
+      room.heroes.forEach(h => { if (h.dueno === null && h.duenoAntiguo === token) h.dueno = token; });
       socket.join(code);
       socket.data.code = code;
       socket.data.token = token;
@@ -62,10 +64,10 @@ function registerSockets(io){
       if (!cls) return cb && cb({ ok:false, err:'Héroe desconocido.' });
       const spot = rooms.freeStart(room);
       const heroe = {
-        id:'h-'+cls.id, dueno:p.token, clsId:cls.id, nombre:cls.name, letra:cls.letter,
+        id:'h-'+cls.id, dueno:p.token, duenoAntiguo:p.token, clsId:cls.id, nombre:cls.name, letra:cls.letter,
         speed:cls.speed, alcance:cls.alcance, dano:cls.dano,
         x:spot.x, y:spot.y, vida:cls.vida, max:cls.vida,
-        fat:0, maxFat:cls.fatiga, acciones:board.ACCIONES_POR_RONDA,
+        fat:cls.fatiga, maxFat:cls.fatiga, acciones:board.ACCIONES_POR_RONDA,
         caido:false, senala:null
       };
       room.heroes.push(heroe);
@@ -111,9 +113,11 @@ function registerSockets(io){
       if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
       const h = room.heroes.find(o => o.id === heroe && o.dueno === p.token);
       if (!h) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
-      // el servidor decide: no se fía de lo que diga el móvil
-      const ok = rooms.reachable(room, h).some(c => c.x === x && c.y === y);
-      if (!ok) return cb && cb({ ok:false, err:'No llegas ahí.' });
+      // el servidor decide: no se fía de lo que diga el móvil.
+      // puede tirar de fatiga para llegar más lejos de lo que da su velocidad.
+      const destino = rooms.alcanceDe(room, h, h.speed + h.fat).find(c => c.x === x && c.y === y);
+      if (!destino) return cb && cb({ ok:false, err:'No llegas ahí.' });
+      if (destino.c > h.speed) h.fat -= (destino.c - h.speed);
       h.x = x; h.y = y;
       push(room);
       cb && cb({ ok:true });
