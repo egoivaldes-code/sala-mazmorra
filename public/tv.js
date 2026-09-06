@@ -18,6 +18,8 @@ document.getElementById('nueva').onclick = function(){
   try { localStorage.removeItem('tvcode'); } catch(e){}
   location.reload();
 };
+document.getElementById('difNormal').onclick = function(){ s.emit('tv:dificultad', 'normal', function(){}); };
+document.getElementById('difDificil').onclick = function(){ s.emit('tv:dificultad', 'dificil', function(){}); };
 s.on('state', function(x){ st = x; draw(); });
 
 function draw(){
@@ -85,11 +87,17 @@ function draw(){
     b.appendChild(np);
   });
   var l = document.getElementById('list');
-  if (!st.players.length){ l.innerHTML = '<div class="empty">Nadie ha entrado todavía.</div>'; return; }
-  l.innerHTML = st.players.map(function(p){
+  if (!st.players.length) l.innerHTML = '<div class="empty">Nadie ha entrado todavía.</div>';
+  else l.innerHTML = st.players.map(function(p){
     return '<div class="pl"><b>'+p.letter+'</b>'+p.name+
       '<s>'+(p.online?'':'sin conexión')+'</s></div>';
   }).join('');
+
+  document.getElementById('difNormal').setAttribute('aria-pressed', st.dificultad === 'normal');
+  document.getElementById('difDificil').setAttribute('aria-pressed', st.dificultad === 'dificil');
+  var banda = st.banda || { gasto:0, heroes:0 };
+  document.getElementById('banda').textContent =
+    (st.enemigos||[]).length + ' enemigos · ' + banda.gasto + ' puntos de banda · ' + banda.heroes + ' héroes';
 }
 window.addEventListener('resize', draw);
 

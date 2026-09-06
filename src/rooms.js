@@ -22,60 +22,145 @@ function despliegue(room, x, y, tam, quien){
   return null;
 }
 
-/* Coloca en la sala un ejemplar de cada enemigo del catálogo.
-   Todavía no se mueven: están para ver los cambios del editor al momento. */
-function poblar(room){
-  room.enemigos = [];
-  const familias = catalog.state.catalogo.enemigos.filter(e => e.datos && e.datos.variantes);
-  let piezas;
+/* Los pasos b) y c) reparten el presupuesto: primero un jefe si el dinero
+   sobra de verdad, luego un puñado de gente cara (más en difícil, menos en
+   normal), y por último rellena de esbirros. Si sobra dinero y no cabe ya
+   ninguno más, cambia esbirros por algo mejor en vez de desperdiciarlo. */
+function formarBanda(fam, dificultad, numHeroes){
+  const cfg = board.DIFICULTADES[dificultad] || board.DIFICULTADES.normal;
+  const inicial = cfg.base + cfg.porJugador * Math.max(numHeroes, 1);
+  let presupuesto = inicial;
 
-  if (familias.length){
-    // una sala = una familia. Da sensación de grupo en vez de feria de monstruos.
-    const fam = room.familia && familias.find(f => f.id === room.familia)
-              || familias[Math.floor(Math.random()*familias.length)];
-    room.familia = fam.id;
-    const base = fam.datos.base || {};
-    piezas = fam.datos.variantes.slice(0, board.SITIOS.length).map((v, i) => ({
-      id: fam.id + '-' + i,
-      tipo: fam.id,
-      familia: fam.nombre,
-      nombre: v.papel || fam.nombre,
-      letra: (v.papel || fam.nombre)[0],
-      aro: fam.datos.aro || '#B04E3C',
-      ficha: v.ficha ? BASE_FICHAS + v.ficha : '',
-      vida: v.vida || base.vida || 4,
-      max:  v.vida || base.vida || 4,
-      tam:  v.tam  || base.tam  || '1x1'
-    }));
-  } else {
-    // contenido de reserva, por si la base no responde
-    piezas = catalog.state.catalogo.enemigos.slice(0, board.SITIOS.length).map((e, i) => {
-      const d = e.datos || {};
-      return { id: e.id+'-'+i, tipo: e.id, familia: e.nombre, nombre: e.nombre,
-               letra: d.letra || e.nombre[0], aro:'#B04E3C', ficha:'',
-               vida: d.vida||1, max: d.vida||1, tam: d.tam||'1x1' };
-    });
+  const porRango = r => fam.datos.variantes.filter(v => (v.rango || 'esbirro') === r);
+  const jefes = porRango('jefe'), grandes = porRango('grande'),
+        apoyos = porRango('apoyo'), veteranos = porRango('veterano'),
+        esbirros = porRango('esbirro');
+  const coste = v => v.coste || 1;
+  const elegir = lista => lista[Math.floor(Math.random()*lista.length)];
+  const elegidos = [];
+
+  // a) un jefe, sólo si sobra dinero de verdad: uno que se lleve todo el
+  // presupuesto deja un duelo, no una banda
+  if (jefes.length){
+    const jefe = elegir(jefes);
+    if (presupuesto >= coste(jefe) * 2){
+      presupuesto -= coste(jefe);
+      elegidos.push(jefe);
+    }
   }
 
-  piezas.forEach((bicho, i) => {
-    bicho.x = board.SITIOS[i][0]; bicho.y = board.SITIOS[i][1];
-    let celdas = despliegue(room, bicho.x, bicho.y, bicho.tam, bicho.id);
-    if (!celdas) celdas = buscarHueco(room, bicho);
-    if (!celdas) return;
-    bicho.celdas = celdas;
-    room.enemigos.push(bicho);
-  });
+  // b) gente cara: en difícil hasta tres tipos distintos, en normal sólo uno
+  const intentar = lista => {
+    if (elegidos.length >= board.TOPE_FIGURAS || !lista.length) return false;
+    const v = elegir(lista);
+    if (presupuesto < coste(v)) return false;
+    presupuesto -= coste(v);
+    elegidos.push(v);
+    return true;
+  };
+  if (dificultad === 'dificil'){
+    intentar(apoyos); intentar(grandes); intentar(veteranos);
+  } else if (!intentar(veteranos)){
+    intentar(apoyos);
+  }
+
+  // c) rellena con esbirros hasta agotar el dinero o llegar al tope
+  while (esbirros.length && elegidos.length < board.TOPE_FIGURAS){
+    const v = elegir(esbirros);
+    if (presupuesto < coste(v)) break;
+    presupuesto -= coste(v);
+    elegidos.push(v);
+  }
+
+  // d) si se llegó al tope y sobra dinero, no se tira: se cambia algún
+  // esbirro por lo mejor que alcance. Más difícil = peores bichos, no sólo más.
+  if (elegidos.length >= board.TOPE_FIGURAS && presupuesto > 0){
+    const mejoras = [...apoyos, ...grandes, ...veteranos];
+    let cambiado = true;
+    while (cambiado && presupuesto > 0 && mejoras.length){
+      cambiado = false;
+      const i = elegidos.findIndex(v => (v.rango || 'esbirro') === 'esbirro');
+      if (i < 0) break;
+      const disponible = presupuesto + coste(elegidos[i]);
+      const mejor = mejoras.filter(v => coste(v) <= disponible)
+        .sort((a,b) => coste(b) - coste(a))[0];
+      if (!mejor) break;
+      presupuesto = disponible - coste(mejor);
+      elegidos[i] = mejor;
+      cambiado = true;
+    }
+  }
+
+  return { elegidos, gasto: inicial - presupuesto };
 }
 
-/* Si su sitio de siempre está ocupado, se le busca otro donde quepa entero.
-   Se busca desde la derecha: los héroes entran por la izquierda. */
-function buscarHueco(room, bicho){
-  for (let x = board.W - 1; x >= 0; x--)
+/* Busca dónde colocar una pieza: recorre la mitad derecha del tablero de
+   derecha a izquierda (los héroes entran por la izquierda), comprobando con
+   despliegue() que cabe entera. */
+function buscarSitio(room, pieza){
+  const mitad = Math.floor(board.W / 2);
+  for (let x = board.W - 1; x >= mitad; x--)
     for (let y = 0; y < board.H; y++){
-      const celdas = despliegue(room, x, y, bicho.tam, bicho.id);
-      if (celdas){ bicho.x = x; bicho.y = y; return celdas; }
+      const celdas = despliegue(room, x, y, pieza.tam, pieza.id);
+      if (celdas) return { x, y, celdas };
     }
   return null;
+}
+
+/* Forma la banda de la sala con el presupuesto de la dificultad elegida y el
+   número de héroes en la mesa, y la coloca en el tablero. Se llama cada vez
+   que cambia el número de héroes o la dificultad: se rehace desde cero. */
+function poblar(room){
+  room.enemigos = [];
+  room.dificultad = room.dificultad || 'normal';
+  const familias = catalog.state.catalogo.enemigos.filter(e => e.datos && e.datos.variantes);
+
+  let fam;
+  if (familias.length){
+    // una sala = una familia. Da sensación de grupo en vez de feria de monstruos.
+    fam = room.familia && familias.find(f => f.id === room.familia)
+        || familias[Math.floor(Math.random()*familias.length)];
+  } else {
+    // contenido de reserva, por si la base no responde: cada bicho suelto hace de esbirro
+    fam = { id:'reserva', nombre:'Reserva', datos:{ aro:'#B04E3C', base:{}, variantes:
+      catalog.state.catalogo.enemigos.map(e => {
+        const d = e.datos || {};
+        return { papel:e.nombre, rango:'esbirro', coste:1,
+                 vida:d.vida, velocidad:d.velocidad, dano:d.dano, tam:d.tam, ficha:d.ficha };
+      }) } };
+  }
+  room.familia = fam.id;
+
+  const { elegidos, gasto } = formarBanda(fam, room.dificultad, room.heroes.length);
+  room.gasto = gasto;
+
+  const base = fam.datos.base || {};
+  const piezas = elegidos.map((v, i) => ({
+    id: fam.id + '-' + i,
+    tipo: fam.id,
+    familia: fam.nombre,
+    nombre: v.papel || fam.nombre,
+    letra: (v.papel || fam.nombre)[0],
+    aro: fam.datos.aro || '#B04E3C',
+    ficha: v.ficha ? BASE_FICHAS + v.ficha : '',
+    vida: v.vida || base.vida || 4,
+    max:  v.vida || base.vida || 4,
+    tam:  v.tam  || base.tam  || '1x1',
+    rango: v.rango || 'esbirro',
+    velocidad: v.velocidad || base.velocidad || 4,
+    dano: v.dano || base.dano || [1,2]
+  }));
+
+  // las grandes van primero: si no, los esbirros les quitan el hueco
+  const grandes = piezas.filter(p => { const m = board.medidas(p.tam); return m.an*m.al > 1; });
+  const pequenas = piezas.filter(p => !grandes.includes(p));
+
+  [...grandes, ...pequenas].forEach(pieza => {
+    const sitio = buscarSitio(room, pieza);
+    if (!sitio) return;
+    pieza.x = sitio.x; pieza.y = sitio.y; pieza.celdas = sitio.celdas;
+    room.enemigos.push(pieza);
+  });
 }
 
 function makeRoom(){
@@ -126,6 +211,8 @@ function snapshot(room){
       };
     }),
     paleta: board.PALETA.map(c => ({ ...c, libre: board.colorLibre(room, c.id) })),
+    dificultad: room.dificultad || 'normal',
+    banda: { gasto: room.gasto || 0, heroes: room.heroes.length },
     familia: room.familia || null,
     enemigos: (room.enemigos||[]).map(e => ({
       id:e.id, nombre:e.nombre, familia:e.familia, letra:e.letra,

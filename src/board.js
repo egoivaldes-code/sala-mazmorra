@@ -23,6 +23,14 @@ const SITIOS = [[10,1],[11,5],[9,7],[10,4],[11,1],[9,3]];
 /* cada héroe puede hacer dos acciones por ronda (moverse, atacar...) */
 const ACCIONES_POR_RONDA = 2;
 
+/* presupuesto de la banda: base + porJugador por cada héroe en la mesa */
+const DIFICULTADES = {
+  normal:  { nombre:'Normal',  base:6, porJugador:3 },
+  dificil: { nombre:'Difícil', base:9, porJugador:5 }
+};
+/* por muy grande que sea el presupuesto, la banda no pasa de aquí */
+const TOPE_FIGURAS = 10;
+
 /* colores para distinguir a los jugadores en la tele: uno por persona */
 const PALETA = [
   { id:'ambar',     nombre:'Ámbar',     hex:'#D3A63C' },
@@ -86,6 +94,7 @@ function colocaciones(x, y, tam){
 module.exports = {
   W, H, WALLS, isWall, inBoard,
   CLASSES, START, SITIOS, ACCIONES_POR_RONDA,
+  DIFICULTADES, TOPE_FIGURAS,
   PALETA, hexDe, colorLibre, primerColorLibre,
   medidas, colocaciones
 };

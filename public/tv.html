@@ -21,6 +21,11 @@ background:#2E3742;border:1px solid var(--brass);color:var(--brass);font-family:
 .empty{color:var(--dim);font-size:14px;padding:10px 0}
 /* el héroe ocupa la casilla entera y se pinta con el color de su jugador */
 .tok.jugador{border-radius:3px}
+.dificultad{display:flex;gap:8px;margin-top:14px}
+.dif{flex:1;padding:9px 6px;background:var(--stone2);border:1px solid var(--line);
+border-radius:4px;color:var(--dim);font-size:13px}
+.dif[aria-pressed="true"]{border-color:var(--brass);background:#282F38;color:var(--brass)}
+.banda{color:var(--dim);font-size:12.5px;margin-top:8px}
 </style></head><body>
 <div class="wrap">
   <div class="left"><div class="board" id="b"></div></div>
@@ -30,6 +35,11 @@ background:#2E3742;border:1px solid var(--brass);color:var(--brass);font-family:
     <div class="url" id="url"></div>
     <div class="qr"><img id="qr" alt="Código QR para entrar"></div>
     <div id="list"><div class="empty">Nadie ha entrado todavía.</div></div>
+    <div class="dificultad">
+      <button class="dif" id="difNormal">Normal</button>
+      <button class="dif" id="difDificil">Difícil</button>
+    </div>
+    <div class="banda" id="banda"></div>
     <button id="nueva" style="margin-top:14px;padding:9px 14px;background:transparent;
       border:1px solid var(--line);border-radius:4px;color:var(--dim);font-size:13px">Empezar sala nueva</button>
   </div>

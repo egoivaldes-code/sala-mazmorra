@@ -71,6 +71,8 @@ function registerSockets(io){
         caido:false, senala:null
       };
       room.heroes.push(heroe);
+      // un héroe más en la mesa cambia el presupuesto de la banda
+      rooms.poblar(room);
       push(room);
       const mios = room.heroes.filter(h => h.dueno === p.token).length;
       cb && cb({ ok:true, cls:clsId, mios });
@@ -87,8 +89,22 @@ function registerSockets(io){
       const i = room.heroes.findIndex(h => h.id === idHeroe && h.dueno === p.token);
       if (i < 0) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
       room.heroes.splice(i, 1);
+      // un héroe menos en la mesa también cambia el presupuesto de la banda
+      rooms.poblar(room);
       push(room);
       cb && cb({ ok:true });
+    });
+
+    /* la tele decide la dificultad de la banda */
+    socket.on('tv:dificultad', (nivel, cb) => {
+      if (!socket.data.isTv) return cb && cb({ ok:false, err:'Sólo la tele puede cambiar la dificultad.' });
+      const room = rooms.rooms.get(socket.data.code);
+      if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
+      if (!board.DIFICULTADES[nivel]) return cb && cb({ ok:false, err:'Dificultad desconocida.' });
+      room.dificultad = nivel;
+      rooms.poblar(room);
+      push(room);
+      cb && cb({ ok:true, dificultad:nivel });
     });
 
     /* cambiar de color: rechaza el que ya lleve otro jugador */
