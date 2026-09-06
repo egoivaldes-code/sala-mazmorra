@@ -1,0 +1,70 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Editor de enemigos</title>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+body{display:flex;justify-content:center;padding:18px}
+.app{width:100%;max-width:900px}
+h1{font-family:var(--serif);font-size:21px;font-weight:600;margin:0 0 4px}
+h2{font-family:var(--serif);font-size:15px;font-weight:600;margin:20px 0 9px}
+p.sub{color:var(--dim);font-size:13.5px;margin:0 0 16px;line-height:1.45}
+input,select{width:100%;padding:10px;background:var(--stone2);border:1px solid var(--line);
+border-radius:4px;color:var(--parchment);font-family:var(--serif);font-size:14.5px}
+label{display:block;font-size:11px;color:var(--dim);margin:0 0 4px}
+.campo{margin-bottom:10px}
+.fila{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+.big{padding:12px 22px;background:var(--brass);color:#1A1408;border:0;border-radius:4px;
+font-size:15px;font-weight:600}
+.chip{padding:8px 12px;background:var(--stone2);border:1px solid var(--line);border-radius:4px;
+color:var(--parchment);font-family:var(--serif);font-size:13.5px;margin:0 6px 6px 0}
+.chip[aria-pressed="true"]{border-color:var(--brass);background:#282F38}
+.caja{background:var(--stone2);border:1px solid var(--line);border-radius:4px;padding:14px;margin-bottom:14px}
+.err{color:#E08C7A;font-size:13px;min-height:18px;margin:8px 0 0}
+.ok{color:var(--moss)}
+.vars{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.var{background:var(--stone2);border:1px solid var(--line);border-radius:4px;padding:8px;text-align:center}
+.var img{width:100%;height:96px;object-fit:contain;display:block;margin-bottom:6px}
+.var input,.var select{font-size:12.5px;padding:7px;margin-bottom:5px}
+.aviso{border-left:2px solid var(--brass);padding-left:11px;color:var(--dim);font-size:13px;
+line-height:1.45;margin-bottom:16px}
+.hide{display:none}
+</style></head><body>
+<div class="app">
+  <div id="puerta">
+    <h1>Editor</h1>
+    <p class="sub">Los cambios entran en las partidas abiertas al momento.</p>
+    <div class="campo" style="max-width:320px">
+      <label for="cl">Contraseña</label><input id="cl" type="password" autocomplete="current-password">
+    </div>
+    <button class="big" id="pasa">Entrar</button>
+    <p class="err" id="e0"></p>
+  </div>
+
+  <div id="panel" class="hide">
+    <h1>Enemigos</h1>
+    <p class="sub" id="fuente"></p>
+    <div class="aviso">Cada familia comparte comportamiento; las ocho variantes sólo cambian
+      el aspecto y algún número. Guarda con la tele abierta al lado y lo verás cambiar.</div>
+    <div id="lista"></div>
+
+    <h2 id="tituloFam"></h2>
+    <div class="caja">
+      <div class="fila">
+        <div class="campo"><label for="vid">Vida base</label><input id="vid" type="number" min="1" max="99"></div>
+        <div class="campo"><label for="vel">Velocidad</label><input id="vel" type="number" min="1" max="12"></div>
+        <div class="campo"><label for="dan">Daño</label><input id="dan" placeholder="2-4"></div>
+        <div class="campo"><label for="aro">Color de la familia</label><input id="aro" placeholder="#6E9163"></div>
+      </div>
+    </div>
+
+    <h2>Las ocho variantes</h2>
+    <div class="vars" id="vars"></div>
+    <p class="err" id="e1"></p>
+    <button class="big" id="guardar" style="margin-top:14px">Guardar familia</button>
+    <button class="chip" id="recargar" style="margin-left:8px">Recargar desde la base</button>
+  </div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/editor.js"></script>
+</body></html>
