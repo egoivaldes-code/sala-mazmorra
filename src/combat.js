@@ -45,6 +45,43 @@ function tirada([min, max]){
   return min + Math.floor(Math.random() * (max - min + 1));
 }
 
+/* ---------- el dado rojo y los dados de daño ----------
+   El servidor tira SIEMPRE estos dados: el móvil sólo pide tirar y recibe
+   el resultado ya decidido. Si el número lo generase el teléfono, cualquiera
+   podría sacar críticos toda la noche. */
+
+function tirarRojo(tipo){
+  const caras = board.DADOS_ROJOS[tipo] || board.DADOS_ROJOS[board.ROJO_DEFECTO_HEROE];
+  return caras[Math.floor(Math.random() * caras.length)];
+}
+
+function tirarDanio({ n, caras }){
+  const dados = [];
+  for (let i = 0; i < n; i++) dados.push(1 + Math.floor(Math.random() * caras));
+  return { dados, total: dados.reduce((a, b) => a + b, 0) };
+}
+
+/* los héroes llevan dados:{n,caras}; los enemigos del catálogo todavía
+   llevan el viejo dano:[min,max]. Aquí se reparte según lo que tenga. */
+function danioDe(atacante){
+  if (atacante.dados) return tirarDanio(atacante.dados);
+  const total = tirada(atacante.dano || [1, 2]);
+  return { dados: [total], total };
+}
+
+/* Resuelve un ataque completo: el dado rojo decide si acierta, falla o saca
+   un símbolo, y los dados de daño se tiran siempre (aunque el rojo falle,
+   para que se vean en la mesa). El Mago (sinRojo) es de área y siempre cae. */
+function resolverAtaque(atacante, defensor){
+  if (atacante.sinRojo){
+    const { dados, total } = danioDe(atacante);
+    return { rojo: null, dados, total, resultado: 'impacto' };
+  }
+  const rojo = tirarRojo(atacante.rojo || board.ROJO_DEFECTO_HEROE);
+  const { dados, total } = danioDe(atacante);
+  return { rojo, dados, total: rojo === 'fallo' ? 0 : total, resultado: rojo };
+}
+
 /* Coloca una unidad en (x,y) si cabe entera desplegada; si no, no la mueve. */
 function colocar(room, u, x, y){
   const celdas = rooms.despliegue(room, x, y, u.tam, u.id);
@@ -174,11 +211,16 @@ function moverYAtacar(room, e, h){
   const alcance = e.alcance || 1;
   if (separacion(e, h) > alcance) acercarse(room, e, h);
   if (separacion(e, h) <= alcance){
-    const dano = tirada(e.dano || [1,2]);
-    // se narra antes de herir: si el golpe tira al héroe, que se cuente en
-    // ese orden ("ataca" y LUEGO "cae al suelo"), no al revés
-    relatar(room, e.nombre + ' ataca a ' + h.nombre + ' (' + dano + ').');
-    herir(room, h, dano);
+    const t = resolverAtaque(e, h);
+    e.ultimaTirada = Object.assign({}, t, { ts: Date.now() });
+    if (t.resultado === 'fallo'){
+      relatar(room, e.nombre + ' falla el golpe.');
+    } else {
+      // se narra antes de herir: si el golpe tira al héroe, que se cuente en
+      // ese orden ("ataca" y LUEGO "cae al suelo"), no al revés
+      relatar(room, e.nombre + ' ataca a ' + h.nombre + ' (' + t.total + ').');
+      herir(room, h, t.total);
+    }
   } else {
     // si no ha llegado a tiro, que quede constancia: si no, una ronda entera
     // de enemigos que sólo caminan no deja ni una frase en la tele
@@ -281,5 +323,6 @@ function turnoEnemigos(room){
 
 module.exports = {
   celdasDe, separacion, heroesEnPie, heroesTodos,
-  relatar, tirada, colocar, herir, revisarFinal, turnoEnemigos
+  relatar, tirada, colocar, herir, revisarFinal, turnoEnemigos,
+  tirarRojo, tirarDanio, resolverAtaque
 };

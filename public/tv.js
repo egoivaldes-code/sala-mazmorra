@@ -27,6 +27,7 @@ function draw(){
   var b = document.getElementById('b');
   var cw = b.clientWidth / st.board.w, ch = b.clientHeight / st.board.h;
   b.innerHTML = '';
+  actualizaTiradas(cw, ch);
   for (var y=0; y<st.board.h; y++) for (var x=0; x<st.board.w; x++){
     var wall = st.board.walls.some(function(w){ return w[0]===x && w[1]===y; });
     var c = document.createElement('div');
@@ -107,6 +108,60 @@ function draw(){
     '<div class="turnoinfo">' + turnoTexto + '</div>' + '<div class="relato">' + relato + '</div>';
 }
 window.addEventListener('resize', draw);
+
+/* ---------- tiradas de dados ----------
+   Cada tirada trae su propio "ts": si cambió desde la última vez que la
+   vimos, es nueva y hay que animarla. Cada ficha lleva su temporizador
+   aparte, así que las tiradas de fichas distintas se ven a la vez, nunca
+   en cola: con 6 héroes y 2 acciones son 12 tiradas por ronda. */
+var vistas = {};
+var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+var SIMBOLOS = { fallo:'✕', impacto:'⚔', critico:'⚔⚔' };
+
+function actualizaTiradas(cw, ch){
+  var lista = [];
+  (st.players||[]).forEach(function(h){
+    if (h.ultimaTirada) lista.push({ id:'h:'+h.id, t:h.ultimaTirada, x:h.x, y:h.y, anc:1, alt:1 });
+  });
+  (st.enemigos||[]).forEach(function(e){
+    if (!e.ultimaTirada) return;
+    var cs = e.celdas || [[e.x,e.y]];
+    var xs = cs.map(function(c){return c[0];}), ys = cs.map(function(c){return c[1];});
+    var x0 = Math.min.apply(null,xs), y0 = Math.min.apply(null,ys);
+    lista.push({ id:'e:'+e.id, t:e.ultimaTirada,
+      x:x0, y:y0, anc:(Math.max.apply(null,xs)-x0+1), alt:(Math.max.apply(null,ys)-y0+1) });
+  });
+  lista.forEach(function(u){
+    if (vistas[u.id] === u.t.ts) return;
+    vistas[u.id] = u.t.ts;
+    mostrarTirada(u, cw, ch);
+  });
+}
+
+function mostrarTirada(u, cw, ch){
+  var capa = document.getElementById('dados');
+  if (!capa) return;
+  var caja = document.createElement('div');
+  caja.className = 'tirada' + (reduceMotion ? ' directa' : '');
+  caja.style.left = (u.x*cw + (u.anc*cw)/2) + 'px';
+  caja.style.top = (u.y*ch) + 'px';
+
+  if (u.t.rojo){
+    var r = document.createElement('div');
+    r.className = 'dado rojo';
+    r.textContent = SIMBOLOS[u.t.rojo] || '?';
+    caja.appendChild(r);
+  }
+  (u.t.dados||[]).forEach(function(n){
+    var d = document.createElement('div');
+    d.className = 'dado blanco' + (u.t.resultado === 'fallo' ? ' apagado' : '');
+    d.textContent = n;
+    caja.appendChild(d);
+  });
+
+  capa.appendChild(caja);
+  setTimeout(function(){ if (caja.parentNode) caja.parentNode.removeChild(caja); }, 850);
+}
 
 /* pasa un "#rrggbb" a "rgba(r,g,b,alfa)", para pintar el relleno de la casilla del héroe */
 function hexConAlpha(hex, alfa){

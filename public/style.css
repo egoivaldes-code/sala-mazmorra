@@ -36,3 +36,27 @@ border:2px solid var(--moss);cursor:pointer}
 button{font-family:var(--serif);cursor:pointer}
 :focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.tok{transition:none}}
+
+/* ---------- tirada de dados sobre la ficha del atacante ----------
+   .boardwrap envuelve el tablero y la capa de dados: la capa no se toca
+   cuando draw() vuelve a pintar el tablero entero, así varias tiradas de
+   fichas distintas pueden verse a la vez, cada una con su propio temporizador. */
+.boardwrap{position:relative}
+.capadados{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.tirada{position:absolute;display:flex;gap:3px;transform:translate(-50%,-120%);
+animation:tiradapop .82s ease forwards}
+.tirada.directa{animation:none;opacity:1}
+.dado{min-width:19px;height:19px;padding:0 2px;border-radius:4px;display:flex;
+align-items:center;justify-content:center;font-family:var(--sans);font-weight:700;
+font-size:11px;box-shadow:0 2px 5px rgba(0,0,0,.45)}
+.dado.rojo{background:#8C3A2E;border:1px solid #5E241B;color:#F3D9CE;font-size:13px}
+.dado.blanco{background:var(--parchment);border:1px solid #B9AF98;color:#1A1408}
+.dado.blanco.apagado{background:#3A424C;border-color:#2A3138;color:#6B7684;
+text-decoration:line-through}
+@keyframes tiradapop{
+  0%{opacity:0;transform:translate(-50%,-96%) scale(.6)}
+  14%{opacity:1;transform:translate(-50%,-122%) scale(1)}
+  76%{opacity:1;transform:translate(-50%,-122%) scale(1)}
+  100%{opacity:0;transform:translate(-50%,-132%) scale(.92)}
+}
+@media (prefers-reduced-motion:reduce){.tirada{animation:none;opacity:1}}

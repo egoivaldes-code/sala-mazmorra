@@ -69,6 +69,9 @@ border:1px solid var(--line)}
 border:1px solid var(--line);border-radius:4px;color:var(--parchment);font-size:14px;font-weight:600}
 .secundario[disabled]{opacity:.35}
 .secundario.hide{display:none}
+.resultado{font-size:12.5px;min-height:16px;margin:0 0 6px;color:var(--dim);line-height:1.35}
+.resultado.fallo{color:#E08C7A}
+.resultado.critico{color:var(--brass);font-weight:600}
 .tok.foe.enalcance{box-shadow:0 0 0 2px var(--brass) inset}
 .tok.foe.sel{background:var(--brass);border-color:var(--brass);color:#1A1408}
 .modal{position:fixed;inset:0;background:rgba(13,17,22,.92);display:flex;
@@ -111,6 +114,8 @@ border:1px solid var(--line);border-radius:6px;color:var(--parchment);font-size:
     </div>
     <div class="board" id="b"></div>
     <p class="hint" id="hint"></p>
+    <div class="resultado" id="resultado"></div>
+    <button class="secundario hide" id="repetir">Repetir tirada (1 fatiga)</button>
     <div class="verbos">
       <button class="verb" id="mv">Mover</button>
       <button class="verb" id="at">Atacar</button>

@@ -272,6 +272,31 @@ document.getElementById('finronda').onclick = function(){
     if (!r.ok) document.getElementById('hint').textContent = r.err;
   });
 };
+document.getElementById('repetir').onclick = function(){
+  s.emit('repetir_rojo', { heroe:activo }, function(r){
+    if (!r.ok){ document.getElementById('hint').textContent = r.err; return; }
+    render();
+  });
+};
+
+/* el resultado del último ataque de este héroe, en pequeño bajo el tablero;
+   si falló y le queda fatiga, deja repetir sólo el dado rojo */
+function pintaResultado(h){
+  var el = document.getElementById('resultado');
+  var t = h.ultimaTirada;
+  if (!t){ el.textContent = ''; el.className = 'resultado'; }
+  else {
+    var texto = t.resultado === 'fallo' ? 'Fallo. (' + t.dados.join('+') + ')'
+      : t.resultado === 'critico' ? '¡Crítico! ' + t.total + ' de daño.'
+      : 'Impacto: ' + t.total + ' de daño.';
+    el.textContent = texto;
+    el.className = 'resultado ' + t.resultado;
+  }
+  var btn = document.getElementById('repetir');
+  var puede = t && t.resultado === 'fallo' && h.fat > 0 &&
+    st.turno === 'heroes' && !st.fin && !h.caido && !h.pendiente;
+  btn.className = puede ? 'secundario' : 'secundario hide';
+}
 
 function mostrarSimbolo(nombre){
   document.getElementById('simboloTexto').textContent =
@@ -348,6 +373,7 @@ function render(){
   document.getElementById('ltr').textContent = h.letter;
   document.getElementById('nm').textContent = (mj ? mj.name + ' · ' : '') + h.name;
   pintaBarras(h);
+  pintaResultado(h);
 
   var b = document.getElementById('b');
   var cw = b.clientWidth / st.board.w, ch = b.clientHeight / st.board.h;
