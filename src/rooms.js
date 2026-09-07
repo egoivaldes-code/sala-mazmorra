@@ -158,6 +158,7 @@ function poblar(room){
     max:  v.vida || base.vida || 4,
     tam:  v.tam  || base.tam  || '1x1',
     rango: v.rango || 'esbirro',
+    rojo: board.rojoDeRango(v.rango || 'esbirro'),
     velocidad: v.velocidad || base.velocidad || 4,
     dano: v.dano || base.dano || [1,2],
     alcance: v.alcance || base.alcance || 1
@@ -234,6 +235,7 @@ function snapshot(room){
         id:h.id, token:h.dueno, name:h.nombre, cls:h.clsId, letter:h.letra,
         speed:h.speed, x:h.x, y:h.y, vida:h.vida, max:h.max, fat:h.fat, maxFat:h.maxFat,
         acciones:h.acciones, caido:h.caido, alcance:h.alcance, senala:h.senala || null,
+        rojo: h.rojo || board.ROJO_DEFECTO_HEROE, ultimaTirada: h.ultimaTirada || null,
         color: dueno ? dueno.color : 'hueso', hex: dueno ? board.hexDe(dueno.color) : board.hexDe('hueso'),
         online: dueno ? dueno.online : false
       };
@@ -247,6 +249,7 @@ function snapshot(room){
       id:e.id, nombre:e.nombre, familia:e.familia, letra:e.letra,
       aro:e.aro, ficha:e.ficha, vida:e.vida, max:e.max,
       x:e.x, y:e.y, tam:e.tam || '1x1', celdas:e.celdas || [[e.x,e.y]],
+      rojo: e.rojo || board.ROJO_DEFECTO_HEROE, ultimaTirada: e.ultimaTirada || null,
       // los nombres de los héroes que lo tienen señalado como objetivo ahora mismo
       senalan: room.heroes.filter(h => !h.caido && h.senala === e.id).map(h => h.nombre)
     })),

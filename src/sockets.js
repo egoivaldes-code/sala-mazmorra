@@ -66,10 +66,10 @@ function registerSockets(io){
       const spot = rooms.freeStart(room);
       const heroe = {
         id:'h-'+cls.id, dueno:p.token, duenoAntiguo:p.token, clsId:cls.id, nombre:cls.name, letra:cls.letter,
-        speed:cls.speed, alcance:cls.alcance, dano:cls.dano,
+        speed:cls.speed, alcance:cls.alcance, dados:cls.dados, sinRojo:!!cls.sinRojo, rojo:board.ROJO_DEFECTO_HEROE,
         x:spot.x, y:spot.y, vida:cls.vida, max:cls.vida,
         fat:cls.fatiga, maxFat:cls.fatiga, acciones:board.ACCIONES_POR_RONDA,
-        caido:false, senala:null
+        caido:false, senala:null, ultimaTirada:null
       };
       room.heroes.push(heroe);
       // un héroe más en la mesa cambia el presupuesto de la banda
@@ -155,8 +155,8 @@ function registerSockets(io){
       return null;
     }
 
-    /* ataca a un enemigo a su alcance; si sobrevive, hay un 40% de que salga
-       un símbolo y el jugador tenga que decidir qué hacer con él */
+    /* ataca a un enemigo a su alcance. El dado rojo decide si acierta, falla
+       o saca un crítico; en crítico se deja un símbolo pendiente, como antes. */
     socket.on('atacar', ({ heroe, objetivo }, cb) => {
       const room = rooms.rooms.get(socket.data.code);
       if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
@@ -171,19 +171,64 @@ function registerSockets(io){
       if (combat.separacion(h, e) > h.alcance) return cb && cb({ ok:false, err:'Fuera de alcance.' });
 
       h.acciones--;
-      const dano = combat.tirada(h.dano);
       const nombreEnemigo = e.nombre;
-      combat.herir(room, e, dano);
-      combat.relatar(room, h.nombre + ' ataca a ' + nombreEnemigo + ' (' + dano + ').');
+      // el servidor tira SIEMPRE el dado: el móvil sólo pide tirar y recibe
+      // el resultado ya decidido, nunca lo genera él
+      const tirada = combat.resolverAtaque(h, e);
+      h.ultimaTirada = Object.assign({}, tirada, { ts: Date.now(), objetivo: e.id });
+
+      if (tirada.resultado === 'fallo'){
+        combat.relatar(room, h.nombre + ' falla el golpe.');
+      } else {
+        combat.herir(room, e, tirada.total);
+        combat.relatar(room, h.nombre + ' ataca a ' + nombreEnemigo + ' (' + tirada.total + ').');
+      }
 
       const sigueVivo = room.enemigos.includes(e);
-      if (sigueVivo && Math.random() < 0.4){
+      if (tirada.resultado === 'critico' && sigueVivo){
         h.pendiente = { objetivo: e.id };
         push(room);
-        return cb && cb({ ok:true, simbolo:true, nombre:nombreEnemigo });
+        return cb && cb({ ok:true, tirada, simbolo:true, nombre:nombreEnemigo });
       }
       push(room);
-      cb && cb({ ok:true, simbolo:false });
+      cb && cb({ ok:true, tirada, simbolo:false });
+    });
+
+    /* repite sólo el dado rojo del último ataque de este héroe (no los dados
+       de daño, que ya estaban tirados): cuesta 1 de fatiga y sólo vale si ese
+       ataque falló. Así fallar deja de ser mala suerte y pasa a ser una
+       decisión: ¿gasto fatiga en repetir o la guardo para moverme? */
+    socket.on('repetir_rojo', ({ heroe }, cb) => {
+      const room = rooms.rooms.get(socket.data.code);
+      if (!room) return cb && cb({ ok:false, err:'Sala perdida.' });
+      const p = room.players.get(socket.data.token);
+      if (!p) return cb && cb({ ok:false, err:'No estás en la sala.' });
+      const h = room.heroes.find(o => o.id === heroe && o.dueno === p.token);
+      if (!h) return cb && cb({ ok:false, err:'Ese héroe no es tuyo.' });
+      if (room.fin) return cb && cb({ ok:false, err:'La batalla ha terminado.' });
+      if (room.turno !== 'heroes') return cb && cb({ ok:false, err:'No es el turno de los héroes.' });
+      if (h.caido) return cb && cb({ ok:false, err:'Está caído.' });
+      if (!h.ultimaTirada || h.ultimaTirada.resultado !== 'fallo')
+        return cb && cb({ ok:false, err:'Sólo puedes repetir una tirada fallida.' });
+      if (h.fat <= 0) return cb && cb({ ok:false, err:'No te queda fatiga.' });
+
+      h.fat--;
+      const rojo = combat.tirarRojo(h.rojo);
+      const dados = h.ultimaTirada.dados;
+      const objetivo = h.ultimaTirada.objetivo;
+      const total = rojo === 'fallo' ? 0 : dados.reduce((a, b) => a + b, 0);
+      h.ultimaTirada = { rojo, dados, total, resultado: rojo, ts: Date.now(), objetivo };
+
+      const e = room.enemigos.find(x => x.id === objetivo);
+      if (rojo === 'fallo'){
+        combat.relatar(room, h.nombre + ' repite el dado rojo y vuelve a fallar.');
+      } else if (e){
+        combat.herir(room, e, total);
+        combat.relatar(room, h.nombre + ' repite el dado rojo y acierta a ' + e.nombre + ' (' + total + ').');
+        if (rojo === 'critico' && room.enemigos.includes(e)) h.pendiente = { objetivo: e.id };
+      }
+      push(room);
+      cb && cb({ ok:true, tirada: h.ultimaTirada });
     });
 
     /* resuelve el símbolo que dejó pendiente el último ataque */

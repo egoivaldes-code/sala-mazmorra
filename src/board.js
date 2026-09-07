@@ -10,13 +10,28 @@ const isWall = (x,y) => WALLS.some(w => w[0]===x && w[1]===y);
 const inBoard = (x,y) => x>=0 && y>=0 && x<W && y<H;
 
 const CLASSES = [
-  { id:'gue', name:'Guerrero', letter:'G', speed:3, vida:14, fatiga:2, alcance:1, dano:[3,5] },
-  { id:'pal', name:'Paladín',  letter:'P', speed:3, vida:12, fatiga:3, alcance:1, dano:[3,5] },
-  { id:'pic', name:'Pícaro',   letter:'Í', speed:5, vida:8,  fatiga:3, alcance:1, dano:[2,4] },
-  { id:'arq', name:'Arquero',  letter:'A', speed:4, vida:9,  fatiga:3, alcance:6, dano:[2,4] },
-  { id:'mag', name:'Mago',     letter:'M', speed:3, vida:8,  fatiga:4, alcance:4, dano:[3,4] },
-  { id:'cle', name:'Clérigo',  letter:'C', speed:3, vida:10, fatiga:4, alcance:1, dano:[2,3] }
+  { id:'gue', name:'Guerrero', letter:'G', speed:3, vida:14, fatiga:2, alcance:1, dados:{n:2, caras:6} },
+  { id:'pal', name:'Paladín',  letter:'P', speed:3, vida:12, fatiga:3, alcance:1, dados:{n:2, caras:6} },
+  { id:'pic', name:'Pícaro',   letter:'Í', speed:5, vida:8,  fatiga:3, alcance:1, dados:{n:1, caras:6} },
+  { id:'arq', name:'Arquero',  letter:'A', speed:4, vida:9,  fatiga:3, alcance:6, dados:{n:2, caras:6} },
+  // el Mago ataca en área y siempre acierta: no tira dado rojo de precisión
+  { id:'mag', name:'Mago',     letter:'M', speed:3, vida:8,  fatiga:4, alcance:4, dados:{n:1, caras:8}, sinRojo:true },
+  { id:'cle', name:'Clérigo',  letter:'C', speed:3, vida:10, fatiga:4, alcance:1, dados:{n:1, caras:6} }
 ];
+
+/* ---------- dado rojo (precisión) ----------
+   Cada cara es 'fallo', 'impacto' o 'critico'. Cuanto mejor el dado, menos
+   fallos y más críticos. El héroe empieza con el normal; los enemigos lo
+   sacan de su rango (ver ROJO_POR_RANGO). */
+const DADOS_ROJOS = {
+  gastado:    ['fallo','fallo','impacto','impacto','impacto','critico'],
+  normal:     ['fallo','impacto','impacto','impacto','impacto','critico'],
+  templado:   ['impacto','impacto','impacto','impacto','impacto','critico'],
+  legendario: ['impacto','impacto','impacto','impacto','critico','critico']
+};
+const ROJO_DEFECTO_HEROE = 'normal';
+const ROJO_POR_RANGO = { esbirro:'gastado', veterano:'gastado', apoyo:'normal', grande:'normal', jefe:'templado' };
+function rojoDeRango(rango){ return ROJO_POR_RANGO[rango] || ROJO_DEFECTO_HEROE; }
 const START = [[0,4],[0,3],[0,5],[1,4],[1,3],[1,5]];
 const SITIOS = [[10,1],[11,5],[9,7],[10,4],[11,1],[9,3]];
 
@@ -96,5 +111,6 @@ module.exports = {
   CLASSES, START, SITIOS, ACCIONES_POR_RONDA,
   DIFICULTADES, TOPE_FIGURAS,
   PALETA, hexDe, colorLibre, primerColorLibre,
-  medidas, colocaciones
+  medidas, colocaciones,
+  DADOS_ROJOS, ROJO_DEFECTO_HEROE, rojoDeRango
 };
